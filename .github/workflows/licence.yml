@@ -1,0 +1,65 @@
+name: Licence guard
+
+# Read IT ships no copyleft code. That is a licence promise, not a preference:
+# the app is sold and carries advertising, so the whole point of the Apache-2.0
+# relicensing (RELICENSING.md) is that nothing copyleft reaches the user's
+# device. A dependency bump can break that silently, so it is checked here.
+#
+# The script fails the build on:
+#   - any copyleft, source-available or non-commercial licence in the tree
+#   - any reference to espeak-ng (GPL-3.0) anywhere in the source
+#   - a sherpa-onnx Android archive older than 2.0.1 (which bundles espeak-ng)
+#   - a non-commercial Pocket TTS voice being offered or fetched
+#
+# It also rewrites the generated dependency table in THIRD_PARTY_LICENSES.md.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: licence
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check licences
+        run: node scripts/check-licences.mjs
+
+      # The guard rewrites the generated table. If it changed, the commit did
+      # not run it, or a dependency moved licence. Fail rather than let the
+      # inventory drift.
+      - name: The inventory must be current
+        run: |
+          if ! git diff --quiet -- THIRD_PARTY_LICENSES.md; then
+            echo "THIRD_PARTY_LICENSES.md is out of date. Run: node scripts/check-licences.mjs" >&2
+            git --no-pager diff -- THIRD_PARTY_LICENSES.md
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licence-report
+          path: THIRD_PARTY_LICENSES.md
+          retention-days: 30
