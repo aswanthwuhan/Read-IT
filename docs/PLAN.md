@@ -20,7 +20,7 @@ product is in [PRODUCT.md](../PRODUCT.md); this file records what is in scope.
 
 ## Principles
 
-- Private at launch: no account, no server, no sync, no telemetry. What is read
+- Data is private: no account, no server, no sync, no telemetry. What is read
   stays on the device. The one optional network call is the opt-in update check.
 - Offline is the normal state, not a degraded one. No remote font, no model fetched
   at reading time, no surface that waits on a request.

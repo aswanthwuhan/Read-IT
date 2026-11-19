@@ -12,7 +12,7 @@ declare global {
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const REPO_URL = 'https://github.com/aswanthwuhan/readit';
+const REPO_URL = 'https://github.com/aswanthwuhan/Read-IT';
 
 /** The ids in the order the section list uses. */
 const SECTION_IDS = ['voice', 'voice-models', 'pronunciation', 'cached-audio', 'storage', 'backup', 'about'];

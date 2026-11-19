@@ -6,8 +6,9 @@ Offline-first reader for books you already own: import your own PDF, EPUB, DOCX,
 and web articles, read them in a reflowing reader (or as PDF pages), and listen to them with
 on-device voices. Files, highlights and notes live in IndexedDB on your device only —
 no account, no backend, no server for reading. Apache-2.0.
-Version 0.5.0 is the first Read IT release: Android, Windows and the web as an installable PWA.
-See `CHANGELOG.md`.
+Version 0.1.0 is the first public Read IT release: Android, Windows and the web as an
+installable PWA. See `CHANGELOG.md`. The source is public at
+[github.com/aswanthwuhan/Read-IT](https://github.com/aswanthwuhan/Read-IT).
 
 ## Who it is for
 
@@ -29,12 +30,13 @@ See `CHANGELOG.md`.
 
 ## Download / install
 
-**Not released yet.** Read IT 0.5.0 is in preparation: the repository is private and the store
-accounts are not open. What ships, and how you install it:
+**Public source, private build pipeline.** v0.1.0 is the first release: the source is
+public on GitHub; the Android APK is an unsigned debug build for review and testing, and
+the store accounts are not open. What ships, and how you install it:
 
-**Android (APK).** A signed APK from the project's Releases page. Android 8.0 or newer with
-WebView 110+ is required; allow installs from your browser or file manager when asked. Build and
-signing notes are in [docs/ANDROID.md](docs/ANDROID.md).
+**Android (APK).** Android 8.0 or newer with WebView 110+ is required. The v0.1.0 release is
+a source release; build and install the APK with [docs/ANDROID.md](docs/ANDROID.md). A signed,
+store-ready APK is planned for the store launch.
 
 **Windows (installer).** A Windows installer (`ReadIT_*_x64-setup.exe`) that installs per user
 with no admin prompt. The build is unsigned, so SmartScreen shows "Windows protected your PC":

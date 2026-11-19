@@ -18,7 +18,7 @@ import { startTutorial } from '../components/Tutorial';
 import WhatsNew from '../components/WhatsNew';
 import './settings.css';
 
-const REPO_URL = 'https://github.com/aswanthwuhan/readit';
+const REPO_URL = 'https://github.com/aswanthwuhan/Read-IT';
 
 const SECTIONS = [
   { id: 'voice', label: 'Voice' },

@@ -19,7 +19,7 @@ export const UPDATE_DISMISSED_KEY = 'app.updateDismissed';
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** A slow mobile network must not hold the app open. */
 export const UPDATE_TIMEOUT_MS = 10_000;
-export const RELEASES_URL = 'https://api.github.com/repos/aswanthwuhan/readit/releases?per_page=5';
+export const RELEASES_URL = 'https://api.github.com/repos/aswanthwuhan/Read-IT/releases?per_page=5';
 
 /** A release newer than the running app, as the Library banner needs it. */
 export interface UpdateRelease {

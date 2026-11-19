@@ -603,7 +603,7 @@ describe('library: update banner', () => {
       json: async () => [
         {
           tag_name: tag,
-          html_url: `https://github.com/aswanthwuhan/readit/releases/tag/${tag}`,
+          html_url: `https://github.com/aswanthwuhan/Read-IT/releases/tag/${tag}`,
           draft: false,
           prerelease: true,
         },
@@ -630,7 +630,7 @@ describe('library: update banner', () => {
     const download = updateBanner()?.querySelector<HTMLAnchorElement>('a');
     expect(download?.textContent).toBe('Download');
     expect(download?.getAttribute('href')).toBe(
-      'https://github.com/aswanthwuhan/readit/releases/tag/v9.9.9',
+      'https://github.com/aswanthwuhan/Read-IT/releases/tag/v9.9.9',
     );
     expect(download?.getAttribute('target')).toBe('_blank');
     expect(download?.getAttribute('rel')).toContain('noopener');

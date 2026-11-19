@@ -20,7 +20,7 @@ const NOW = 1_700_000_000_000;
 function release(tag: string, overrides: Record<string, unknown> = {}) {
   return {
     tag_name: tag,
-    html_url: `https://github.com/aswanthwuhan/readit/releases/tag/${tag}`,
+    html_url: `https://github.com/aswanthwuhan/Read-IT/releases/tag/${tag}`,
     draft: false,
     prerelease: true,
     body: 'notes nobody reads',
@@ -123,7 +123,7 @@ describe('checkForUpdate', () => {
 
     expect(result).toEqual({
       version: '9.9.9',
-      url: 'https://github.com/aswanthwuhan/readit/releases/tag/v9.9.9',
+      url: 'https://github.com/aswanthwuhan/Read-IT/releases/tag/v9.9.9',
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];

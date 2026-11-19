@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://aswanthwuhan.github.io/readit/sitemap.xml
