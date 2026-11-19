@@ -134,8 +134,12 @@ rather than hardcoding it — `tokenizer.json` → `model.vocab`.
 * ARPAbet→IPA table and stress placement — written by us, from scratch.
 * Out-of-vocabulary fallback — NRL rules; log the word so the failure rate is measurable.
 
-**Phase 2 — optional:** port `misaki`'s English G2P (Apache-2.0) if the Phase-1 A/B
-listening test shows a gap. misaki is what Kokoro was trained against, so it matches best.
+**Phase 2 — the merged lexicon is live:** `hexgrad/misaki` (Apache-2.0, the G2P Kokoro
+was trained with) English data (`us_gold`, `us_silver`, `gb_gold`, `gb_silver`) is
+merged with the sherpa-onnx `lexicon-en-us.txt` into `public/lexicon/lexicon-en-us.txt`
+(misaki entries win for words in both). Measured on the book fixture: merged 96.8% word
+coverage vs sherpa 92.5% vs misaki `us_gold` alone 92.2%. The native Android plugin
+keeps the sherpa lexicon; the web engine uses the merged one.
 
 **Acceptance test (must pass before M2 closes):** render 20 paragraphs — 10 fiction,
 10 non-fiction, including proper nouns, numbers, currency, dates, hyphenation, dialogue —

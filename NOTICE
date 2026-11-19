@@ -20,6 +20,12 @@ Kokoro-82M and kokoro.js
   phonemiser has been replaced with Read IT's own grapheme-to-phoneme engine
   (src/tts/kokoro/g2p/). See src/tts/kokoro/UPSTREAM.md.
 
+hexgrad/misaki (Kokoro G2P, English data)
+  The web English lexicon is the merged best-for-novels lexicon:
+  misaki/data/{us_gold,us_silver,gb_gold,gb_silver}.json (word -> Kokoro-compatible
+  phonemes) merged with sherpa-onnx's lexicon-en-us.txt. See src/tts/kokoro/UPSTREAM.md.
+  https://github.com/hexgrad/misaki — Apache-2.0.
+
 sherpa-onnx
   Copyright (c) 2023 Xiaomi Corp. and contributors
   https://github.com/k2-fsa/sherpa-onnx
