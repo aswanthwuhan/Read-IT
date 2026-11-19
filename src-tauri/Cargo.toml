@@ -1,0 +1,20 @@
+[package]
+name = "readit"
+version = "0.4.1"
+description = "Read IT desktop shell (offline ebook reader with on-device text-to-speech)"
+authors = ["AuraPharmLab"]
+license = "Apache-2.0"
+edition = "2024"
+rust-version = "1.90"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "readit_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.5", features = [] }

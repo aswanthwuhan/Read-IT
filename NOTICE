@@ -15,10 +15,10 @@ Kokoro-82M and kokoro.js
   Copyright (c) 2025 hexgrad (Kokoro contributors)
   https://github.com/hexgrad/kokoro
   Licensed under the Apache License, Version 2.0.
-  A copy of the licence is included at packages/kokoro-js/LICENSE.
-  The kokoro.js sources in packages/kokoro-js/ are modified: the espeak-ng
+  A copy of the licence is included at src/tts/kokoro/upstream/LICENSE.
+  The kokoro.js sources in src/tts/kokoro/ are modified: the espeak-ng
   phonemiser has been replaced with Read IT's own grapheme-to-phoneme engine
-  (packages/kokoro-js/src/phonemize.js). See packages/kokoro-js/UPSTREAM.md.
+  (src/tts/kokoro/g2p/). See src/tts/kokoro/UPSTREAM.md.
 
 sherpa-onnx
   Copyright (c) 2023 Xiaomi Corp. and contributors
@@ -43,7 +43,8 @@ Literata
 CMU Pronouncing Dictionary
   Copyright (c) 1993-2014 Carnegie Mellon University
   http://www.speech.cs.cmu.edu/cgi-bin/cmudict
-  Free for any use. Used to build the pronunciation tables in src/tts/g2p/.
+  Free for any use. Used to build the pronunciation tables in src/tts/kokoro/g2p/
+  and public/lexicon/lexicon-en-us.txt.
 
 --------------------------------------------------------------------------------
 Content and code originating outside this repository

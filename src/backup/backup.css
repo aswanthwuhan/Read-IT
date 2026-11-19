@@ -1,0 +1,133 @@
+/* Backup panel: one flat block out, one flat block back in. The Settings page
+   already draws the surface, so the blocks only stack their rows and a hairline
+   separates them. Tokens from src/styles.css. */
+
+.backup-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.backup-block {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.backup-block + .backup-block {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+/* One line under each heading, the reason before the button. */
+.backup-line {
+  margin: 0;
+  max-width: var(--measure-ui);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+  text-wrap: pretty;
+}
+
+/* What the opened half says: three short paragraphs, one per question. */
+.backup-explain {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.backup-explain p {
+  margin: 0;
+  max-width: var(--measure-ui);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+  text-wrap: pretty;
+}
+
+.backup-actions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+@media (min-width: 520px) {
+  .backup-actions {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}
+
+.backup-file {
+  width: 100%;
+  max-width: 100%;
+  min-height: var(--tap-comfort);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.backup-file::file-selector-button {
+  min-height: var(--tap-comfort);
+  margin-right: var(--space-3);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+
+/* "Last backup: N days ago" — a quiet line under the export buttons. */
+.backup-last {
+  margin: 0;
+}
+
+/* The merge/replace choice is a plain pair of rows on the panel's own surface,
+   not a filled box inside it: no border, background or radius. A hairline above
+   each row separates them. */
+.backup-mode {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.backup-mode > .field-label {
+  margin: 0;
+  padding-bottom: var(--space-1);
+}
+
+.backup-radio {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-comfort);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  cursor: pointer;
+}
+
+.backup-radio input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.backup-radio-label {
+  font-weight: var(--fw-semibold);
+}
+
+.backup-panel .banner p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
+}

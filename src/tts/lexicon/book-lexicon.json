@@ -1,0 +1,22 @@
+[
+  { "id": "b-1", "pattern": "\\b[Tt]olkien\\b", "replacement": "Toll-keen", "isRegex": true },
+  { "id": "b-2", "pattern": "\\b[Oo]'[Bb]rien\\b", "replacement": "Oh-Breen", "isRegex": true },
+  { "id": "b-3", "pattern": "\\b[Cc]ao\\b", "replacement": "Tsao", "isRegex": true },
+  { "id": "b-4", "pattern": "\\b[Ee]nid\\b", "replacement": "Ee-nid", "isRegex": true },
+  { "id": "b-5", "pattern": "\\b[Mm]aeve\\b", "replacement": "Mayv", "isRegex": true },
+  { "id": "b-6", "pattern": "\\b[Pp]tolemy\\b", "replacement": "Tol-eh-mee", "isRegex": true },
+  { "id": "b-7", "pattern": "\\b[Qq]uixote\\b", "replacement": "Kee-ho-tay", "isRegex": true },
+  { "id": "b-8", "pattern": "\\b[Hh]okusai\\b", "replacement": "Ho-koo-sigh", "isRegex": true },
+  { "id": "b-9", "pattern": "\\b[Nn]ostradamus\\b", "replacement": "Nos-tra-dah-mus", "isRegex": true },
+  { "id": "b-10", "pattern": "\\b[Ss]zymborska\\b", "replacement": "Shim-bor-ska", "isRegex": true },
+  { "id": "b-11", "pattern": "\\b[Dd]ostoevsky\\b", "replacement": "Dos-to-yev-skee", "isRegex": true },
+  { "id": "b-12", "pattern": "\\b[Rr]imbaud\\b", "replacement": "Ram-bo", "isRegex": true },
+  { "id": "b-13", "pattern": "\\b[Pp]roust\\b", "replacement": "Proost", "isRegex": true },
+  { "id": "b-14", "pattern": "\\b[Gg]oethe\\b", "replacement": "Gur-tuh", "isRegex": true },
+  { "id": "b-15", "pattern": "\\b[Nn]ietzsche\\b", "replacement": "Nee-chuh", "isRegex": true },
+  { "id": "b-16", "pattern": "\\b[Ss]a'id\\b", "replacement": "Sah-eed", "isRegex": true },
+  { "id": "b-17", "pattern": "\\b[Aa]chebe\\b", "replacement": "Ah-chay-bay", "isRegex": true },
+  { "id": "b-18", "pattern": "\\b[Ww]oolf\\b", "replacement": "Woolf", "isRegex": true },
+  { "id": "b-19", "pattern": "\\b[Aa]usten\\b", "replacement": "Aw-stin", "isRegex": true },
+  { "id": "b-20", "pattern": "\\b[Yy]eats\\b", "replacement": "Yates", "isRegex": true }
+]

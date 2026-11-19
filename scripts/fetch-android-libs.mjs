@@ -1,0 +1,45 @@
+// Downloads native Android deps kept out of git (sherpa-onnx AAR is ~50 MB) and verifies SHA-256.
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+
+const dir = new URL('../android/app/libs/', import.meta.url);
+const libs = [
+  // sherpa-onnx 2.0.1 is the first Apache-2.0 release that no longer bundles the
+  // copyleft phonemiser (upstream PR #4055). Never downgrade below 2.0.0.
+  ['sherpa-onnx-2.0.1.aar', 'https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar', 'a8d09d1d32f3eb8520482c6d3d43fae674681c5b050385967c70a3c2c9bf0ee7'],
+  ['commons-compress-1.26.2.jar', 'https://repo1.maven.org/maven2/org/apache/commons/commons-compress/1.26.2/commons-compress-1.26.2.jar', '9168a03141d8fc7eda21a2360d83cc0412bcbb1d6204d992bd48c2573cb3c6b8'],
+  // commons-compress' bzip2/tar code needs these at runtime; a vendored jar brings no transitive deps (issue #1).
+  ['commons-io-2.16.1.jar', 'https://repo1.maven.org/maven2/commons-io/commons-io/2.16.1/commons-io-2.16.1.jar', 'f41f7baacd716896447ace9758621f62c1c6b0a91d89acee488da26fc477c84f'],
+  ['commons-lang3-3.14.0.jar', 'https://repo1.maven.org/maven2/org/apache/commons/commons-lang3/3.14.0/commons-lang3-3.14.0.jar', '7b96bf3ee68949abb5bc465559ac270e0551596fa34523fddf890ec418dde13c'],
+];
+
+// The native lexicon frontend reads this from the APK assets; fetch it with the same
+// digest check as the libs so an upstream change cannot slip in unnoticed.
+const assetsDir = new URL('../android/app/src/main/assets/', import.meta.url);
+const lexicon = [
+  'lexicon-en-us.txt',
+  'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt',
+  '8b67ae549a465eee78f92ecb74644ad90c3c58ce65f19c68baf85878a10ef73a',
+];
+
+const sha = (buf) => createHash('sha256').update(buf).digest('hex');
+
+/** Fetch `name` from `url` into `destDir`, skipping a copy whose digest already matches. */
+async function fetchVerified(destDir, name, url, want) {
+  const file = new URL(name, destDir);
+  if (existsSync(file) && sha(readFileSync(file)) === want) return;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (sha(buf) !== want) throw new Error(`${name}: checksum mismatch`);
+  writeFileSync(file, buf);
+  console.log(`fetched ${name}`);
+}
+
+mkdirSync(dir, { recursive: true });
+for (const [name, url, want] of libs) {
+  await fetchVerified(dir, name, url, want);
+}
+
+mkdirSync(assetsDir, { recursive: true });
+await fetchVerified(assetsDir, ...lexicon);

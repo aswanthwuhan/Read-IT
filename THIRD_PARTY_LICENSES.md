@@ -22,7 +22,7 @@ Columns:
 | Component | Version | Licence | Where | Attribution |
 |---|---|---|---|---|
 | Read IT (this project) | 0.1.0 | Apache-2.0 | bundled | — |
-| `kokoro-js` (vendored, patched) | 1.2.1 | Apache-2.0 | bundled | NOTICE + About |
+| `kokoro.js` (vendored, patched, `src/tts/kokoro/`) | 1.2.1 | Apache-2.0 | bundled | NOTICE + About |
 | `sherpa-onnx` (Android AAR) | 2.0.1+ | Apache-2.0 | bundled (Android) | NOTICE + About |
 | `@huggingface/transformers` | 3.8.1 | Apache-2.0 | bundled | NOTICE |
 | `onnxruntime-web` | (via transformers) | MIT | bundled | NOTICE |
@@ -59,11 +59,9 @@ Columns:
 | `dexie` | 4.4.7 | Apache-2.0 |
 | `dexie-react-hooks` | 4.4.0 | Apache-2.0 |
 | `flatbuffers` | 25.9.23 | Apache-2.0 |
-| `kokoro-js` | 1.2.1 | Apache-2.0 |
 | `localforage` | 1.10.0 | Apache-2.0 |
 | `long` | 5.3.2 | Apache-2.0 |
 | `pdfjs-dist` | 6.5.438 | Apache-2.0 |
-| `phonemizer` | 1.2.1 | Apache-2.0 |
 | `sharp` | 0.34.5 | Apache-2.0 |
 | `duck` | 0.1.12 | BSD |
 | `dingbat-to-unicode` | 1.0.2 | BSD-2-Clause |
@@ -71,7 +69,6 @@ Columns:
 | `lop` | 0.4.2 | BSD-2-Clause |
 | `mammoth` | 1.13.0 | BSD-2-Clause |
 | `option` | 0.2.4 | BSD-2-Clause |
-| `@open-spaced-repetition/srs-kit` | 1.0.0 | BSD-3-Clause |
 | `@protobufjs/aspromise` | 1.1.2 | BSD-3-Clause |
 | `@protobufjs/base64` | 1.1.2 | BSD-3-Clause |
 | `@protobufjs/codegen` | 2.0.5 | BSD-3-Clause |
@@ -157,7 +154,6 @@ Columns:
 | `set-cookie-parser` | 2.7.3 | MIT |
 | `setimmediate` | 1.0.5 | MIT |
 | `string_decoder` | 1.1.1 | MIT |
-| `ts-fsrs` | 6.0.0 | MIT |
 | `underscore` | 1.13.8 | MIT |
 | `undici-types` | 8.9.0 | MIT |
 | `util-deprecate` | 1.0.2 | MIT |

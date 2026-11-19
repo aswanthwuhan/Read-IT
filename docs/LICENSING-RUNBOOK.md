@@ -1,6 +1,6 @@
 # Licensing runbook — Read IT
 
-Concrete steps to get from "PharmaReader (GPL-3.0, ships espeak-ng)" to
+Concrete steps to get from "the earlier reader (GPL-3.0, ships espeak-ng)" to
 "Read IT (Apache-2.0, no GPL anywhere in the distributed binary)".
 
 This is the part of the project where a silent mistake costs you the ability to ship a
@@ -23,7 +23,7 @@ Two sources. Both must go.
 | Artefact | Licence | Where it comes from |
 |---|---|---|
 | `LICENSE` | Apache-2.0 | the repo root |
-| `NOTICE` | attribution | credits PharmaReader, Kokoro, Pocket TTS, CMUdict, Literata, the libraries |
+| `NOTICE` | attribution | credits the earlier reader, Kokoro, Pocket TTS, CMUdict, Literata, the libraries |
 | `THIRD_PARTY_LICENSES.md` | inventory | every dependency + every downloadable model, its licence, whether it is bundled or downloaded, and whether it needs attribution |
 
 `THIRD_PARTY_LICENSES.md` should be **generated** (see §E), not hand-maintained.
@@ -154,9 +154,8 @@ words. Ship the pronunciation override table so users can fix the residue.
 
 ## G. Step 5 — the relicensing statement
 
-PharmaReader is GPL-3.0. Read IT is Apache-2.0. The sole copyright holder is
-`aswanthwuhan` (git history: one author, no other human committers; AI agents are not
-copyright holders), so the relicensing is valid — but it must be **documented**.
+the earlier reader is GPL-3.0. Read IT is Apache-2.0. The sole copyright holder is
+`aswanthwuhan` (git history: one author and no other human committers), so the relicensing is valid — but it must be **documented**.
 
 `RELICENSING.md` should state: the original work, its GPL-3.0 licence and date; the
 copyright holder's exclusive right to relicense; the terms of the new Apache-2.0 grant;
@@ -184,7 +183,7 @@ Run it on every push and PR, from M2 onward.
 ## I. One-page checklist before the first store submission
 
 - [ ] `LICENSE` is Apache-2.0; no GPL text left in the tree except in `THIRD_PARTY_LICENSES.md`
-- [ ] `NOTICE` credits PharmaReader, Kokoro, Pocket TTS, CMUdict, NRL, Literata
+- [ ] `NOTICE` credits the earlier reader, Kokoro, Pocket TTS, CMUdict, NRL, Literata
 - [ ] `RELICENSING.md` + preserved GPL-3.0 original
 - [ ] No `phonemizer` / `espeak` in `packages/`, `src/`, `android/`
 - [ ] sherpa-onnx AAR is **2.0.1** or newer
