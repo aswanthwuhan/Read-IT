@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://aswanthwuhan.github.io/readit/sitemap.xml
+Sitemap: https://aswanthwuhan.github.io/Read-IT/sitemap.xml
