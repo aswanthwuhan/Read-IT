@@ -3,6 +3,7 @@
 import './pdfPolyfill';
 import { GlobalWorkerOptions, Util, getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+import { PDF_IMPORT_MAX_BYTES, PDF_MAX_PAGES } from './limits';
 import workerUrl from './pdfWorker?worker&url';
 import type { ParsedDoc } from '../core/types';
 import { getSetting } from '../core/settings';
@@ -85,11 +86,17 @@ export async function parsePdf(
   options: PdfParseOptions = {},
 ): Promise<PdfParseResult> {
   const columns = options.columns ?? 'auto';
+  if (data.byteLength > PDF_IMPORT_MAX_BYTES) {
+    throw new Error('That PDF is too large to import (over 200 MB).');
+  }
   const loadingTask = getDocument({ data: new Uint8Array(data), ...PDF_ASSETS });
   let detector: PageLayoutDetector | null = null;
 
   try {
     const pdf = await loadingTask.promise;
+    if (pdf.numPages > PDF_MAX_PAGES) {
+      throw new Error('That PDF is too large to import (over 10,000 pages).');
+    }
     const { title, author } = await metadata(pdf, fallbackTitle);
     const pages: PdfPage[] = [];
     const pageItems: PdfTextItem[][] = [];

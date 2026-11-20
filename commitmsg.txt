@@ -1,17 +1,12 @@
-fix(review): bugs/types/quality hardening
+fix(security): cap EPUB/PDF/article-import sizes (decompression bombs)
 
-- system.ts: resolve interrupted utterances as paused so the loop replays the chunk
-- align/index.ts: a timed-out running job frees the aligner slot for the next request
-- lexicon: fix the term-row fast path (wordEntryKey matched nothing)
-- import/index.ts: deleteBook also reclaims the book's cached audio (audioCache.bookId)
-- import/index.ts: relocate() guards against a missing first sentence in an empty book
-- types.ts: ParsedDoc.warning + AudioCacheRecord.bookId + ParsedDoc doc comment
-- SettingsPage.tsx: guard corrupt stored rate/pause/updateCheck values
-- detector.worker.ts: throw when the layout model returns non-float32 detections
-- backup.ts: guard null manifest.json in checkManifest
-- PlayerBar.tsx: disable Play when the chapter has no spoken sentences
-- PlayerBar.tsx: focus-trap + aria on the speed/more popovers
-- player.ts: clear states/timings maps when a queue finishes
-- formatBytes: one shared formatter (src/tts/formatBytes.ts), StoragePanel/TtsSettings re-export it
-- phonemize.ts: make the double-space collapse global
-- kokoroNativeEngine.ts: reject play() on real playback errors (ALREADY DONE EARLIER)
+- src/import/limits.ts (new): EPUB 100 MB input + 500 MB total spine text;
+  PDF 200 MB input + 10,000 pages; article HTML 50 MB
+- EPUB: reject over-limit zips before parsing; cap accumulated spine-file text
+- PDF: reject over-limit files; cap pdf.numPages at 10,000
+- importUrl: streaming capped read on browsers (Content-Length early check too),
+  post-read length checks on native
+
+This closes the security findings from the review: MEDIUM decompression bombs
+in EPUB (epubjs) and PDF (pdf.js), LOW response-size cap for web article
+imports.

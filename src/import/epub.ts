@@ -3,6 +3,7 @@ import type { NavItem } from 'epubjs';
 import type { Chapter, ParsedDoc } from '../core/types';
 import { normaliseText, type BlockSeed } from './blocks';
 import { blocksFromRoot, chapterFromSpine } from './html';
+import { EPUB_IMPORT_MAX_BYTES, EPUB_TEXT_MAX_BYTES } from './limits';
 
 /** The bits of an epubjs Section this module uses (the package has no exported type). */
 interface SpineSection {
@@ -16,6 +17,9 @@ interface SpineSection {
  * references, so a page anchor could only point at the whole spine item.
  */
 export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promise<ParsedDoc> {
+  if (data.byteLength > EPUB_IMPORT_MAX_BYTES) {
+    throw new Error('That EPUB is too large to import (over 100 MB).');
+  }
   const book = ePub();
   // epubjs 0.3.93's ESM entry (the one bundlers pick) only builds the Book; its
   // UMD bundle is the one that opens by itself. Without this `book.ready` never
@@ -44,6 +48,7 @@ export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promi
     // a chapter of its own that repeats the next chapter's title.
     const spineSeeds: BlockSeed[][] = [];
     const spineLabels: string[] = [];
+    let totalTextBytes = 0;
     for (const section of sections) {
       const href = section.href;
       if (!href) continue;
@@ -61,6 +66,10 @@ export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promi
       }
 
       spineSeeds.push(blocksFromRoot(chapterDoc.body));
+      totalTextBytes += chapterDoc.body.textContent?.length ?? 0;
+      if (totalTextBytes > EPUB_TEXT_MAX_BYTES) {
+        throw new Error('That EPUB is too large to import (over 500 MB of text).');
+      }
       spineLabels.push(tocTitles.get(baseHref(href)) ?? tocTitles.get(basename(href)) ?? '');
       section.unload?.();
     }

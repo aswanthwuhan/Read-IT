@@ -7,6 +7,7 @@ import { parseHtmlDocument } from './html';
 import type { LayoutMode } from './pdf';
 import { parseMarkdown } from './md';
 import { parseText } from './txt';
+import { ARTICLE_HTML_MAX_BYTES } from './limits';
 
 export interface ImportResult {
   bookId: string;
@@ -245,6 +246,31 @@ export async function importText(title: string, text: string): Promise<string> {
   return saveRecord(doc, new Blob([text], { type: 'text/plain' }));
 }
 
+const tooLargePage = () =>
+  new Error(`That page is too large to import (over ${ARTICLE_HTML_MAX_BYTES / 1024 ** 2} MB).`);
+
+/**
+ * Read a browser fetch body as text with a hard length cap, throwing as soon as
+ * the content grows past it. Responses without a stream (and the native
+ * Capacitor path, which returns the text up front) are checked by the caller
+ * after reading instead.
+ */
+async function readCappedText(response: Response, cap: number): Promise<string> {
+  const reader = response.body?.getReader?.();
+  if (!reader) return await response.text();
+  const decoder = new TextDecoder();
+  let out = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out += decoder.decode(value, { stream: true });
+    if (out.length > cap) throw tooLargePage();
+  }
+  out += decoder.decode();
+  if (out.length > cap) throw tooLargePage();
+  return out;
+}
+
 /**
  * Fetch a page and keep its article text. On native builds Capacitor patches
  * `fetch` so cross-origin requests work; in a plain browser most sites refuse.
@@ -274,15 +300,23 @@ export async function importUrl(url: string): Promise<string> {
         throw new Error(`That page returned ${response.status}; paste the text instead.`);
       }
       html = String(response.data ?? '');
+      if (html.length > ARTICLE_HTML_MAX_BYTES) throw tooLargePage();
     } else {
       const response = await fetch(target.toString(), { signal: abort.signal });
       if (!response.ok) {
         throw new Error(`That page returned ${response.status}; paste the text instead.`);
       }
-      html = await response.text();
+      const length = Number(response.headers?.get?.('content-length'));
+      if (Number.isFinite(length) && length > ARTICLE_HTML_MAX_BYTES) throw tooLargePage();
+      html = await readCappedText(response, ARTICLE_HTML_MAX_BYTES);
     }
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('That page returned')) throw error;
+    if (
+      error instanceof Error &&
+      (error.message.startsWith('That page returned') || error.message.startsWith('That page is too large'))
+    ) {
+      throw error;
+    }
     throw new Error('This site blocks web import; paste the text instead.');
   } finally {
     clearTimeout(timer);
