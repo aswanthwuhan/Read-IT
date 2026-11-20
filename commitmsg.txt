@@ -1,0 +1,17 @@
+fix(review): bugs/types/quality hardening
+
+- system.ts: resolve interrupted utterances as paused so the loop replays the chunk
+- align/index.ts: a timed-out running job frees the aligner slot for the next request
+- lexicon: fix the term-row fast path (wordEntryKey matched nothing)
+- import/index.ts: deleteBook also reclaims the book's cached audio (audioCache.bookId)
+- import/index.ts: relocate() guards against a missing first sentence in an empty book
+- types.ts: ParsedDoc.warning + AudioCacheRecord.bookId + ParsedDoc doc comment
+- SettingsPage.tsx: guard corrupt stored rate/pause/updateCheck values
+- detector.worker.ts: throw when the layout model returns non-float32 detections
+- backup.ts: guard null manifest.json in checkManifest
+- PlayerBar.tsx: disable Play when the chapter has no spoken sentences
+- PlayerBar.tsx: focus-trap + aria on the speed/more popovers
+- player.ts: clear states/timings maps when a queue finishes
+- formatBytes: one shared formatter (src/tts/formatBytes.ts), StoragePanel/TtsSettings re-export it
+- phonemize.ts: make the double-space collapse global
+- kokoroNativeEngine.ts: reject play() on real playback errors (ALREADY DONE EARLIER)

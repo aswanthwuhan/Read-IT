@@ -14,7 +14,7 @@
  * the result can be a highlight moving forward through the sentence. Words that
  * end up unmatched get the time between their matched neighbours.
  */
-import { estimateTimings, joinKeys, keyForms, similarity, words } from './text';
+import { estimateTimings, keyForms, similarity, words } from './text';
 import type { TranscriptWord, WordTiming } from './types';
 
 /** Cost of leaving one word unmatched; two skips (1.0) must lose to a match scoring over 0.0. */
@@ -79,6 +79,22 @@ export function alignTimings(
   const n = ranges.length;
   const m = transcript.length;
 
+  // Precompute the joined transcript-tail windows once: tail[j][k] is the join
+  // of targetKeys[j-k..j-1]. The per-cell loop below used to allocate two arrays
+  // per (i, j, k) triple (`slice` + `joinKeys`); the windows are shared across
+  // sentences, so they can be built a single time here.
+  const tail: string[][][] = [];
+  for (let j = 0; j <= m; j++) {
+    const row: string[][] = new Array(Math.min(MAX_GROUP, j) + 1).fill([]);
+    for (let k = 1; k <= Math.min(MAX_GROUP, j); k++) {
+      row[k] =
+        k === 1
+          ? targetKeys[j - 1]!
+          : tail[j - 1][k - 1].map((field, i) => (field ?? '') + (targetKeys[j - 1]![i] ?? ''));
+    }
+    tail.push(row);
+  }
+
   // dp[i][j]: best cost for the first i sentence words against the first j
   // transcript words. `step` says how that cell was reached; `group` how many
   // transcript words the match at `step === MATCH` consumed.
@@ -116,7 +132,7 @@ export function alignTimings(
 
       const limit = Math.min(MAX_GROUP, j);
       for (let k = 1; k <= limit; k++) {
-        const score = similarity(sourceKeys[i - 1]!, joinKeys(targetKeys.slice(j - k, j)));
+        const score = similarity(sourceKeys[i - 1]!, tail[j][k]);
         if (score < MIN_SIMILARITY) continue;
         const candidate = cost[prev + j - k]! + (1 - score) + GROUP_PENALTY * (k - 1);
         if (candidate < best - 1e-9) {

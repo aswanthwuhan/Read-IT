@@ -66,8 +66,17 @@ export function scrollToHash(): void {
 
 /** The pause between paragraphs, in the words the Reading panel uses. */
 function pauseSummary(ms: number): string {
-  if (ms <= 0) return 'No pause between paragraphs';
+  if (!(ms > 0)) return 'No pause between paragraphs';
   return `Pause ${(ms / 1000).toFixed(2).replace(/0$/, '')} s`;
+}
+
+/**
+ * A settings row was written by this app, so a missing or corrupt value is a
+ * foreign import or a legacy build's leftovers. Read-time guards keep a
+ * corrupt row from breaking the page (e.g. `rate.toFixed(1)` on a string).
+ */
+function storedNumber(raw: unknown, fallback: number): number {
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : fallback;
 }
 
 interface RowGroupProps {
@@ -96,11 +105,11 @@ export default function SettingsPage() {
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
 
   const engine = useSetting<string>(TTS_ENGINE_SETTING, 'auto');
-  const rate = useSetting<number>(TTS_RATE_SETTING, 1);
-  const pauseMs = useSetting<number>(PAUSE_KEY, DEFAULT_PAUSE_MS);
+  const rate = storedNumber(useSetting<number>(TTS_RATE_SETTING, 1), 1);
+  const pauseMs = Math.max(0, storedNumber(useSetting<number>(PAUSE_KEY, DEFAULT_PAUSE_MS), DEFAULT_PAUSE_MS));
 
   const lastBackup = useSetting<number>(LAST_EXPORT_SETTING, 0);
-  const updateCheck = useSetting<boolean>(UPDATE_CHECK_KEY, false);
+  const updateCheck = useSetting<boolean>(UPDATE_CHECK_KEY, false) === true;
 
   const voiceSummary = `${ENGINE_NAMES[engine] ?? engine} · ${rate.toFixed(1)}×`;
 

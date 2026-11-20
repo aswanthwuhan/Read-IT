@@ -182,6 +182,10 @@ function onTimeout(job: AlignJob): void {
   if (waiting === job) waiting = null;
   job.abandoned = true;
   job.resolve(job.estimate);
+  // A running job that timed out frees the slot: the recogniser may still be
+  // transcribing it, but the next request starts fresh and the late answer is
+  // dropped by `settle` in `done()`/`failed()` once it lands.
+  if (running === job) running = null;
   // A cold session pays for loading 42 MB of weights before the first clip can
   // be recognised, and that first wait is not the model being slow. Resetting
   // the worker now would only restart the load; do not count it.

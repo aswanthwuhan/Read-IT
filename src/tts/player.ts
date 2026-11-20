@@ -30,6 +30,8 @@ export interface PlayerOptions {
    * A big look-ahead is a long synthesis burst at every chapter start.
    */
   prefetchAhead?: number;
+  /** The book being played; its cached clips go with `deleteBook`. */
+  bookId?: string;
   /** Fired when a sentence's audio actually starts — never while it is being rendered. */
   onSentence?(id: string, index: number): void;
   onItemState?(id: string, state: ItemState): void;
@@ -330,6 +332,7 @@ export function createPlayer(options: PlayerOptions): Player {
         audio: blob,
         durationMs,
         createdAt: Date.now(),
+        bookId: options.bookId,
       };
       await putAudio(record);
       // The audio is in the cache now; a stop/seek that landed while it was
@@ -521,21 +524,27 @@ export function createPlayer(options: PlayerOptions): Player {
       emit(item.charMap?.[spokenIndex] ?? charAtFraction(item.text, at));
     });
 
-    void timingsFor(item, clip).then((list) => {
-      if (stopped || gen !== generation || list.length === 0) return;
-      stopLength();
-      stopLength = startClock(() => {
-        if (stopped || gen !== generation || el.ended) return;
-        const played = el.currentTime * 1000;
-        if (played > list[list.length - 1]!.endMs + 120) return clear();
-        let timing = list[0]!;
-        for (const candidate of list) {
-          if (candidate.startMs <= played) timing = candidate;
-          else break;
-        }
-        emit(item.charMap?.[timing.charStart] ?? timing.charStart);
-      });
-    });
+    // `timingsFor` settles, so a WordTiming[] that resolves means the whisper
+    // pipeline is fine; the `.catch` is for the fallback estimator chain, whose
+    // outer promise is memoized and shared — a second caller must not turn it
+    // into an unhandled rejection.
+    void timingsFor(item, clip)
+      .then((list) => {
+        if (stopped || gen !== generation || list.length === 0) return;
+        stopLength();
+        stopLength = startClock(() => {
+          if (stopped || gen !== generation || el.ended) return;
+          const played = el.currentTime * 1000;
+          if (played > list[list.length - 1]!.endMs + 120) return clear();
+          let timing = list[0]!;
+          for (const candidate of list) {
+            if (candidate.startMs <= played) timing = candidate;
+            else break;
+          }
+          emit(item.charMap?.[timing.charStart] ?? timing.charStart);
+        });
+      })
+      .catch(() => undefined);
 
     stopClock = () => {
       stopped = true;
@@ -711,6 +720,10 @@ export function createPlayer(options: PlayerOptions): Player {
       }
     }
     if (gen !== generation) return;
+    // The maps stay allocated for the next chapter at most; clearing them now
+    // means a finished queue does not pin sentence state or timing promises.
+    states.clear();
+    timings.clear();
     state = 'idle';
     options.onDone?.();
   }

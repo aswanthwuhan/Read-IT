@@ -334,7 +334,8 @@ function checkManifest(files: Unzipped): void {
   if (!raw) throw new Error('This zip is not a Read IT backup (no manifest.json).');
   let parsed: Partial<BackupManifest>;
   try {
-    parsed = JSON.parse(strFromU8(raw)) as Partial<BackupManifest>;
+    const value: unknown = JSON.parse(strFromU8(raw));
+    parsed = (value && typeof value === 'object' ? value : {}) as Partial<BackupManifest>;
   } catch {
     throw new Error('This zip is not a Read IT backup (the manifest is not readable).');
   }

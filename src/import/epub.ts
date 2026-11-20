@@ -36,6 +36,7 @@ export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promi
     });
 
     const chapters: Chapter[] = [];
+    const warnings: string[] = [];
     // A Gutenberg EPUB splits its body into files by size, not at chapter breaks:
     // a file can open in the middle of one chapter and then hold two headings.
     // Collect every spine document first and split the book at its headings, so a
@@ -51,9 +52,13 @@ export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promi
       try {
         chapterDoc = (await book.load(href)) as Document;
       } catch {
+        warnings.push(`A chapter file ("${href}") could not be read`);
         continue;
       }
-      if (!chapterDoc?.body) continue;
+      if (!chapterDoc?.body) {
+        warnings.push(`A chapter file ("${href}") had no readable content`);
+        continue;
+      }
 
       spineSeeds.push(blocksFromRoot(chapterDoc.body));
       spineLabels.push(tocTitles.get(baseHref(href)) ?? tocTitles.get(basename(href)) ?? '');
@@ -75,7 +80,13 @@ export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promi
       }
     }
 
-    return { title, author, format: 'epub', chapters };
+    return {
+      title,
+      author,
+      format: 'epub',
+      chapters,
+      warning: warnings.length > 0 ? `Some chapter files in this EPUB could not be read: ${warnings.join('; ')}` : undefined,
+    };
   } finally {
     book.destroy();
   }

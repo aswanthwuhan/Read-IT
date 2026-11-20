@@ -118,7 +118,7 @@ function normalize_text(text) {
 
       // 3. Whitespace normalization
       .replace(/[^\S \n]/g, " ")
-      .replace(/  +/, " ")
+      .replace(/ {2,}/g, " ")
       .replace(/(?<=\n) +(?=\n)/g, "")
 
       // 4. Abbreviations

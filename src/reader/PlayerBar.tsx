@@ -428,6 +428,7 @@ export default function PlayerBar({
           <button
             type="button"
             className="rd-play"
+            disabled={sentenceTotal === 0}
             aria-label={playing ? 'Pause' : state === 'paused' ? 'Resume' : 'Play'}
             aria-pressed={playing}
             onClick={onToggle}

@@ -80,6 +80,8 @@ export interface ParsedDoc {
   author?: string;
   format: DocFormat;
   chapters: Chapter[];
+  /** Shown inline by the library; e.g. a few spine files of an EPUB failed to load. */
+  warning?: string;
 }
 
 /** A book in the library, with its original file kept for backup/export. */
@@ -142,6 +144,8 @@ export interface AudioCacheRecord {
   audio: Blob;
   durationMs: number;
   createdAt: number;
+  /** The book this clip belongs to, so `deleteBook` can reclaim it. */
+  bookId?: string;
 }
 
 export interface Setting {

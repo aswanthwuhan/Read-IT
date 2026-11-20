@@ -429,15 +429,16 @@ class KokoroNativeEngine implements TtsEngine {
     };
   }
 
-  /** Play one WAV Blob through an HTMLAudioElement, resolving on end or stop. */
+  /**
+   * Play one WAV Blob through an HTMLAudioElement. Resolves on a normal stop or
+   * pause; rejects on a real playback error so the speaker can report it.
+   */
   private play(blob: Blob): Promise<void> {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       let done = false;
-      const finish = (): void => {
-        if (done) return;
-        done = true;
+      const cleanup = (): void => {
         audio.onended = null;
         audio.onerror = null;
         try {
@@ -448,14 +449,27 @@ class KokoroNativeEngine implements TtsEngine {
         audio.removeAttribute('src');
         URL.revokeObjectURL(url);
         if (this.current?.url === url) this.current = null;
+      };
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        cleanup();
         resolve();
+      };
+      const fail = (err: unknown): void => {
+        if (done) return;
+        done = true;
+        cleanup();
+        // An error while paused or after a stop() is still a stop, not a fault.
+        if (this.paused) resolve();
+        else reject(err instanceof Error ? err : new Error(String(err)));
       };
       this.current = { audio, url, finish };
       audio.onended = finish;
-      audio.onerror = finish;
+      audio.onerror = () => fail(new Error('Audio playback failed.'));
       if (this.paused) return; // stay silent until resume()
       const started = audio.play();
-      if (started && typeof started.catch === 'function') started.catch(() => finish());
+      if (started && typeof started.catch === 'function') started.catch((err) => fail(err));
     });
   }
 

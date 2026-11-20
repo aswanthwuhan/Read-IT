@@ -133,7 +133,10 @@ function speakOne(
     };
     u.onend = () => {
       if (speaking === u) speaking = null;
-      resolve(true);
+      // Resolve as interrupted when the pause/cancel interrupted the utterance:
+      // some platforms fire `onend` (not `onerror`) on `s.cancel()`, and the
+      // caller replays the chunk when it paused mid-way.
+      resolve(!cancelled());
     };
     u.onerror = (e) => {
       // Cancelling fires "canceled"/"interrupted"; that is us stopping, not a fault.

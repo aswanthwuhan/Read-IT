@@ -116,7 +116,8 @@ async function parseFile(
 
     case 'epub': {
       const { parseEpub } = await import('./epub');
-      return { doc: await parseEpub(await bytes(), fallback) };
+      const parsed = await parseEpub(await bytes(), fallback);
+      return { doc: parsed, warning: parsed.warning };
     }
 
     case 'docx': {
@@ -146,9 +147,11 @@ async function saveRecord(doc: ParsedDoc, fileBlob: Blob, layout?: BookRecord['l
 
 /** Remove a book and everything that hangs off it, in one transaction. */
 export async function deleteBook(bookId: string): Promise<void> {
-  await db.transaction('rw', [db.books, db.highlights, db.bookmarks], async () => {
+  await db.transaction('rw', [db.books, db.highlights, db.bookmarks, db.audioCache], async () => {
     await db.highlights.where('bookId').equals(bookId).delete();
     await db.bookmarks.where('bookId').equals(bookId).delete();
+    const clips = await db.audioCache.filter((r) => r.bookId === bookId).toArray();
+    if (clips.length > 0) await db.audioCache.bulkDelete(clips.map((clip) => clip.key));
     await db.books.delete(bookId);
   });
 }
@@ -549,5 +552,9 @@ function relocate(
       if (found !== undefined) return { sentence: after.flat[found], exact: false };
     }
   }
-  return { sentence: after.flat[0], exact: false };
+  const first = after.flat[0];
+  if (first) return { sentence: first, exact: false };
+  // A hand-crafted empty backup can have no sentences at all; keep the reader's
+  // place on the nearest sentence rather than dropping the position entirely.
+  return { sentence: before.flat[0] ?? { id: sentenceId, chapterId: '', text: '' }, exact: false };
 }

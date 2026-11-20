@@ -171,8 +171,8 @@ afterEach(async () => {
 
 describe('formatBytes', () => {
   it('shows KB below a megabyte and MB above', () => {
-    expect(formatBytes(0)).toBe('0 KB');
-    expect(formatBytes(2048)).toBe('2 KB');
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(2048)).toBe('2.0 KB');
     expect(formatBytes(3.5 * 1024 * 1024)).toBe('3.5 MB');
   });
 });

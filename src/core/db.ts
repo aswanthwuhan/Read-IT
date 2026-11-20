@@ -30,5 +30,5 @@ export const db = new ReadItDB();
 
 /** Ids are UUIDs so separate devices/backups can merge without collisions. */
 export function newId(): string {
-  return crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }

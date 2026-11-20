@@ -65,10 +65,15 @@ scope.onmessage = async (event: MessageEvent<LayoutRequest>) => {
       const outputs = await session.run(feeds, boxesOutput ? [boxesOutput] : undefined);
       const boxes = outputs[boxesOutput] ?? Object.values(outputs)[0];
       if (!boxes) throw new Error('The layout model returned no detections.');
+      // The decoder reads the bytes as floats; if the model ever returns a
+      // different element type, silently wrong boxes are worse than no boxes.
+      if (!(boxes.data instanceof Float32Array)) {
+        throw new Error(`The layout model returned ${boxes.data?.constructor?.name ?? 'non-float32'} detections instead of float32.`);
+      }
 
       const found = dedupeBoxes(
         decodeDetections(
-          boxes.data as Float32Array,
+          boxes.data,
           message.pageWidth,
           message.pageHeight,
           inputSize,

@@ -62,11 +62,14 @@ function offlineContext(sampleRate: number): OfflineAudioContext | null {
   }
 }
 
-async function decode(bytes: ArrayBuffer): Promise<AudioBuffer | null> {
+async function decode(audio: Blob): Promise<AudioBuffer | null> {
+  // The browser detaches the input buffer after `decodeAudioData`, so the
+  // plain-context fallback re-reads the blob instead of reusing it.
+  const read = () => audio.arrayBuffer();
   const offline = offlineContext(WHISPER_SAMPLE_RATE);
   if (offline) {
     try {
-      return await offline.decodeAudioData(bytes.slice(0));
+      return await offline.decodeAudioData(await read());
     } catch {
       /* Fall through to a plain context. */
     }
@@ -76,7 +79,7 @@ async function decode(bytes: ArrayBuffer): Promise<AudioBuffer | null> {
   if (!Ctor) return null;
   const context = new Ctor();
   try {
-    return await context.decodeAudioData(bytes);
+    return await context.decodeAudioData(await read());
   } finally {
     void context.close?.().catch(() => undefined);
   }
@@ -88,7 +91,7 @@ async function decode(bytes: ArrayBuffer): Promise<AudioBuffer | null> {
  */
 export async function decodeToMono16k(audio: Blob): Promise<Float32Array> {
   if (audio.size === 0) return new Float32Array(0);
-  const buffer = await decode(await audio.arrayBuffer());
+  const buffer = await decode(audio);
   if (!buffer) return new Float32Array(0);
   const mono = toMono(buffer);
   return buffer.sampleRate === WHISPER_SAMPLE_RATE ? mono : resampleLinear(mono, buffer.sampleRate, WHISPER_SAMPLE_RATE);
