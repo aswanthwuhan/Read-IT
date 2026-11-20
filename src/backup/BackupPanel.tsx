@@ -63,8 +63,8 @@ export default function BackupPanel() {
     if (
       mode === 'replace' &&
       !window.confirm(
-        'Replace all books, highlights, bookmarks, pronunciations and settings on this device ' +
-          'with the backup? This cannot be undone.',
+        'Replace all books, highlights, bookmarks and pronunciations on this device with the backup? ' +
+          'Settings in the backup are overwritten; private/device settings are kept. This cannot be undone.',
       )
     ) {
       return;
@@ -143,8 +143,8 @@ export default function BackupPanel() {
               onChange={() => setMode('replace')}
             />
             <span>
-              <span className="backup-radio-label">Replace</span> — delete local books, highlights, bookmarks,
-              pronunciations and settings first
+              <span className="backup-radio-label">Replace</span> — delete local books, highlights, bookmarks
+              and pronunciations first; overwrite settings in the backup
             </span>
           </label>
         </div>
@@ -152,8 +152,9 @@ export default function BackupPanel() {
         {mode === 'replace' ? (
           <div className="banner banner-warning" role="alert">
             <p>
-              Importing will delete the books, highlights, bookmarks, pronunciations and settings
-              already on this device before restoring the backup. This cannot be undone.
+              Importing will delete the books, highlights, bookmarks and pronunciations already on
+              this device. Settings in the backup overwrite matching settings here; private/device
+              settings are kept. This cannot be undone.
             </p>
           </div>
         ) : null}
@@ -189,8 +190,9 @@ export default function BackupPanel() {
               it goes to your Downloads folder.
             </p>
             <p>
-              Merge adds the backup to what is already here. Replace deletes local books, highlights, bookmarks,
-              pronunciations and settings first, so what you import is exactly what the other device had.
+              Merge adds the backup to what is already here. Replace deletes local books, highlights,
+              bookmarks and pronunciations first and overwrites settings included in the backup;
+              private/device settings stay as they are.
             </p>
           </div>
         </div>

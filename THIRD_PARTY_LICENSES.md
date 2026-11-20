@@ -29,7 +29,7 @@ Columns:
 | `pdfjs-dist` | 6.5.438 | Apache-2.0 | bundled | NOTICE |
 | `epubjs` | 0.3.93 | BSD-2-Clause | bundled | NOTICE |
 | `mammoth` | 1.13.0 | BSD-2-Clause | bundled | NOTICE |
-| `@mozilla/readability` | 0.6.0 | MPL-2.0 | bundled | NOTICE + file notices |
+| `@mozilla/readability` | 0.6.0 | Apache-2.0 | bundled | NOTICE |
 | `dexie` | 4.4.7 | Apache-2.0 | bundled | NOTICE |
 | `dexie-react-hooks` | 4.4.0 | Apache-2.0 | bundled | NOTICE |
 | `fflate` | 0.8.3 | MIT | bundled | NOTICE |

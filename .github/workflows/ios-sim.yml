@@ -240,6 +240,20 @@ jobs:
           node scripts/ios-sim/run.mjs
         timeout-minutes: 33
 
+      - name: Gate on the simulator report
+        # run.mjs always exits 0 so the artifacts survive; the summary is the
+        # signal. A missing report (crash before it was written) fails too.
+        if: always()
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const file = "ios-sim-artifacts/summary.json";
+            if (!fs.existsSync(file)) { console.error("No simulator summary.json"); process.exit(1); }
+            const s = JSON.parse(fs.readFileSync(file, "utf8"));
+            console.log(s.passed, "passed,", s.failed, "failed");
+            if (s.failed > 0 || !s.urlTested) process.exit(1);
+          '
+
       - name: Simulator screenshot (simctl)
         if: always()
         run: |

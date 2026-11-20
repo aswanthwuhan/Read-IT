@@ -463,6 +463,11 @@
   z-index: 6;
 }
 
+/* Hidden in fullscreen stays mounted so the sleep timer keeps running. */
+.rd-dock[hidden] {
+  display: none;
+}
+
 /* On a desk the sheet belongs to the reading column, not to the whole window. */
 @media (min-width: 900px) {
   .rd-dock {

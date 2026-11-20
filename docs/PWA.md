@@ -15,8 +15,10 @@ Library.
 
 ## Hosting
 
-The production build is deployed to Cloudflare Pages by
-`.github/workflows/pwa.yml`. The iOS simulator workflow builds the same tree under
+The production build is published to GitHub Pages at
+https://aswanthwuhan.github.io/Read-IT/ from the `gh-pages` branch (the `dist`
+output at its root). `.github/workflows/pwa.yml` builds and uploads the same
+bundle for review. The iOS simulator workflow builds the same tree under
 `/readit/` with `VITE_BASE=/readit/` and serves it locally; a plain `pnpm build`
 (no `VITE_BASE`) produces the root-path bundle used by development, Android and
 Windows.

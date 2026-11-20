@@ -629,6 +629,10 @@ function readDoc(value: unknown, where: string): ParsedDoc {
   };
   const author = readOptionalString(raw.author, where, 'parsed.author', 1000);
   if (author !== undefined) doc.author = author;
+  // Export keeps this field; drop it on import and an EPUB with unreadable
+  // spine files loses its "imported with a note" warning on the new device.
+  const warning = readOptionalString(raw.warning, where, 'parsed.warning', 2000);
+  if (warning !== undefined) doc.warning = warning;
   return doc;
 }
 

@@ -13,13 +13,14 @@ const libs = [
   ['commons-lang3-3.14.0.jar', 'https://repo1.maven.org/maven2/org/apache/commons/commons-lang3/3.14.0/commons-lang3-3.14.0.jar', '7b96bf3ee68949abb5bc465559ac270e0551596fa34523fddf890ec418dde13c'],
 ];
 
-// The native lexicon frontend reads this from the APK assets; fetch it with the same
-// digest check as the libs so an upstream change cannot slip in unnoticed.
+// The native lexicon is tracked in git (it is part of the shipped APK assets),
+// so verify its digest in place rather than downloading and dirtying the tree.
+// Its merged pronunciation rules differ from the copy in public/lexicon/ that
+// the web engine fetches.
 const assetsDir = new URL('../android/app/src/main/assets/', import.meta.url);
 const lexicon = [
   'lexicon-en-us.txt',
-  'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt',
-  '8b67ae549a465eee78f92ecb74644ad90c3c58ce65f19c68baf85878a10ef73a',
+  '8652d002284d9a8b83d62dbca3b2b1497f382ba4614d5b18b1c8d19ec57b7fa9',
 ];
 
 const sha = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -42,4 +43,13 @@ for (const [name, url, want] of libs) {
 }
 
 mkdirSync(assetsDir, { recursive: true });
-await fetchVerified(assetsDir, ...lexicon);
+{
+  const [name, want] = lexicon;
+  const file = new URL(name, assetsDir);
+  if (!existsSync(file)) throw new Error(`${name} is missing from the tracked Android assets`);
+  const actual = sha(readFileSync(file));
+  if (actual !== want) {
+    throw new Error(`${name}: tracked lexicon changed (${actual}); review the change before shipping`);
+  }
+  console.log(`${name}: tracked digest verified`);
+}

@@ -1,13 +1,12 @@
 name: Build PWA
 
-# The PWA is served from Cloudflare Pages, not GitHub Pages: the repository starts
-# private, and GitHub Pages is not available to private repositories on the free
-# plan. Cloudflare Pages builds from this repository through its own Git
-# integration, so this workflow only produces and uploads the build for review
-# and for the other jobs to reuse.
+# The PWA is published to GitHub Pages at /Read-IT/: the release's gh-pages
+# branch holds the `dist` output at its root. This workflow builds and uploads
+# that same bundle for review; promoting the artifact to gh-pages is a separate
+# step so a green CI run never deploys by accident.
 #
-# The app is built with VITE_BASE=/readit/ so every asset, the router basename and
-# the service worker live under that sub-path.
+# VITE_BASE must match the live path: every asset URL, the router basename, the
+# manifest scope and the service worker live under that sub-path.
 on:
   push:
     branches: [master]
@@ -54,7 +53,7 @@ jobs:
       - name: Build (Pages sub-path)
         run: pnpm build
         env:
-          VITE_BASE: /readit/
+          VITE_BASE: /Read-IT/
 
       # Cloudflare Pages has no SPA rewrite: a deep link such as /readit/read/abc
       # is served 404.html, which must be the app shell so the router can take over.

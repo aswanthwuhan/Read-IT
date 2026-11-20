@@ -198,6 +198,13 @@ function BookActionsSheet({
       const first = columnsRef.current ?? cancelRef.current;
       const last = deleteRef.current;
       if (!first || !last) return;
+      // Re-reading disables both controls and drops focus to <body>; without
+      // this, Tab moves into the Library while the modal is still open.
+      if (document.activeElement === document.body) {
+        event.preventDefault();
+        last.focus();
+        return;
+      }
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();

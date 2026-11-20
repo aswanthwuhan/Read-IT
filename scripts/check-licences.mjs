@@ -20,15 +20,23 @@ const root = fileURLToPath(new URL('..', import.meta.url));
  * dual licence.
  */
 const DENIED = [
-  // Strong copyleft. The whole reason this script exists.
+  // Strong copyleft. The whole reason this script exists. Packages use both
+  // SPDX ("GPL-3.0-or-later") and the older "GPLv3"/"GNU GPL v3" spellings.
   'GPL-1.0',
   'GPL-2.0',
   'GPL-3.0',
+  'GPLv1',
+  'GPLv2',
+  'GPLv3',
+  'GNU General Public License',
   'AGPL-1.0',
   'AGPL-3.0',
+  'AGPLv3',
   'SSPL-1.0',
+  'SSPL',
   // Source-available, not open source.
   'BUSL-1.1',
+  'BUSL',
   'Elastic-2.0',
   'Fair',
   'PolyForm',
@@ -38,8 +46,11 @@ const DENIED = [
   'CC-BY-NC-2.0',
   'CC-BY-NC-3.0',
   'CC-BY-NC-4.0',
+  'CC-BY-NC',
+  'CC BY NC',
   'CC-BY-NC-ND-4.0',
   'CC-BY-NC-SA-4.0',
+  'NOASSERTION',
 ];
 
 /**
@@ -51,6 +62,12 @@ const WEAK = ['LGPL-2.0', 'LGPL-2.1', 'LGPL-3.0', 'MPL-1.0', 'MPL-2.0', 'EPL-1.0
 
 /** A dependency whose licence is not stated is not allowed either. */
 const DENIED_MISSING = new Set(['UNKNOWN', 'UNLICENSED', '']);
+
+/**
+ * Packages that must never enter the tree under any spelling of their name —
+ * the copyleft phonemisers that were removed when this project relicensed.
+ */
+const DENIED_PACKAGES = /espeak|phonemizer|piper-phonemize|kokoro-js|ts-fsrs/i;
 
 /**
  * Does this licence string permit a non-copyleft use?
@@ -175,8 +192,8 @@ for (const dep of [...allDeps, ...prodDeps]) {
   // `phonemizer` is the known case: it declares Apache-2.0 but ships espeak-ng
   // (GPL-3.0) as WebAssembly. A licence deny-list cannot see that, so these
   // names are banned outright.
-  if (/^(phonemizer|@?[^/]*espeak[^/]*)$/i.test(dep.name)) {
-    fail(`${dep.name}@${dep.versions.join(',')} embeds espeak-ng (GPL-3.0) and must not be in the tree`);
+  if (DENIED_PACKAGES.test(dep.name)) {
+    fail(`${dep.name}@${dep.versions.join(',')} is a banned copyleft phonemiser / removed dependency`);
     continue;
   }
 

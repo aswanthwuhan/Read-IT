@@ -1,12 +1,24 @@
-fix(security): cap EPUB/PDF/article-import sizes (decompression bombs)
+fix(review): second-pass multi-angle audit findings
 
-- src/import/limits.ts (new): EPUB 100 MB input + 500 MB total spine text;
-  PDF 200 MB input + 10,000 pages; article HTML 50 MB
-- EPUB: reject over-limit zips before parsing; cap accumulated spine-file text
-- PDF: reject over-limit files; cap pdf.numPages at 10,000
-- importUrl: streaming capped read on browsers (Content-Length early check too),
-  post-read length checks on native
+Six agents re-reviewed async/state, data integrity, import, TTS, UI/a11y and
+build/CI. Verified defects fixed:
 
-This closes the security findings from the review: MEDIUM decompression bombs
-in EPUB (epubjs) and PDF (pdf.js), LOW response-size cap for web article
-imports.
+- import: strip inline markdown from body paragraphs; keep bare text in mixed
+  inline/block HTML containers; keep inequality text intact in stripInline;
+  move EPUB open/ready inside try/finally; pre-check spine entry sizes from zip
+  metadata before decompression; cap PDF gutter bin array on huge MediaBoxes
+- aligner: settle a parked waiting job when a new request starts after a
+  timeout; ignore late successes from abandoned jobs so backoff still fires
+- audio: native resume() rejects the pending play() promise on a real failure;
+  fix SHA-256 fallback padding at length 55 mod 64
+- data: write bookId into audioCache from playback AND pre-render, retag cached
+  rows on playback, reset the cache byte total after deleteBook, keep
+  ParsedDoc.warning through backup restore; correct Replace-mode wording
+- UI: keep PlayerBar mounted (hidden) so the sleep timer survives fullscreen;
+  guard corrupt tts.rate in the reader; Play disabled from the spoken-queue
+  count; Enter on the reading surface opens sentence actions; focus containment
+  for WhatsNew, selection note, layout/action sheets and reader dialogs
+- build/CI: align VITE_BASE with the live /Read-IT/ Pages path; gate the iOS
+  simulator workflow on its report; cache the G2P lexicon in the service worker;
+  widen the licence guard's denied spellings and banned packages; verify the
+  tracked native lexicon instead of rewriting it; fix NOTICE and licence rows

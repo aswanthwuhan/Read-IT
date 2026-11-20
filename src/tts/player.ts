@@ -322,6 +322,11 @@ export function createPlayer(options: PlayerOptions): Player {
         // A stop/seek that landed while this row was read already revoked every
         // URL; the row stays in the cache for the next play.
         if (gen !== generation) throw new AbortPlayback();
+        // Rows written before `bookId` existed (or by an older pre-render) are
+        // otherwise unreachable to `deleteBook` forever, so retag them in place.
+        if (stored.bookId !== options.bookId) {
+          await putAudio({ ...stored, bookId: options.bookId });
+        }
         return remember({ key, blob: stored.audio, durationMs: stored.durationMs });
       }
       const blob = await synthesizeForItem(text, gen);

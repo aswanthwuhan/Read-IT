@@ -262,7 +262,10 @@ function rotr(x: number, n: number): number {
 }
 
 function sha256(data: Uint8Array): Uint8Array {
-  const padded = new Uint8Array((((data.length + 9) >> 6) + 1) << 6);
+  // SHA-256 pads to a multiple of 64 with at least one 0x80 byte and 8 length
+  // bytes. `>>> 6` on `len + 9` sometimes over-allocates a whole extra block
+  // (e.g. len === 55), which changes the digest off WebCrypto.
+  const padded = new Uint8Array(Math.ceil((data.length + 9) / 64) * 64);
   padded.set(data);
   padded[data.length] = 0x80;
   const view = new DataView(padded.buffer);

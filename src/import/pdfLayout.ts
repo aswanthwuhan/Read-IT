@@ -382,7 +382,10 @@ export function gutterHasTextOnBothSides(
  * reading order.
  */
 function detectGutter(rows: PdfTextItem[][], width: number): Gutter | null {
-  if (rows.length < 12 || width <= 0) return null;
+  // A crafted MediaBox can be kilometres wide; the per-column bin arrays below
+  // are sized from it and would allocate gigabytes. Skip column detection for
+  // such pages rather than letting an imported PDF kill the tab.
+  if (rows.length < 12 || width <= 0 || width > 100_000) return null;
 
   const minRun = Math.max(10, width * 0.015);
   const clear = Math.max(10, width * 0.015);

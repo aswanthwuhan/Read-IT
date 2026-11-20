@@ -59,6 +59,14 @@ export default function WhatsNew({ version, onClose }: WhatsNewProps) {
       const first = (tellMeRef.current ?? gotItRef.current) as HTMLButtonElement | null;
       const last = gotItRef.current;
       if (!first || !last) return;
+      // "Tell me about updates" replaces itself with a status message, so
+      // focus falls to <body>. Bring it back to the remaining button or Tab
+      // would walk into the page behind the modal.
+      if (document.activeElement === document.body) {
+        event.preventDefault();
+        last.focus();
+        return;
+      }
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();

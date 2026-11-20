@@ -171,6 +171,7 @@ interface CurrentAudio {
   audio: HTMLAudioElement;
   url: string;
   finish: () => void;
+  fail: (err: unknown) => void;
 }
 
 class KokoroNativeEngine implements TtsEngine {
@@ -372,9 +373,14 @@ class KokoroNativeEngine implements TtsEngine {
 
   resume(): void {
     this.paused = false;
-    const audio = this.current?.audio;
-    if (!audio) return;
-    void audio.play().catch(() => undefined);
+    const current = this.current;
+    if (!current) return;
+    // play() installed the handlers but left its promise pending while paused;
+    // a failed resume must settle that promise, not leave speak() waiting.
+    const started = current.audio.play();
+    if (started && typeof started.catch === 'function') {
+      void started.catch((err) => current.fail(err));
+    }
   }
 
   /**
@@ -464,7 +470,7 @@ class KokoroNativeEngine implements TtsEngine {
         if (this.paused) resolve();
         else reject(err instanceof Error ? err : new Error(String(err)));
       };
-      this.current = { audio, url, finish };
+      this.current = { audio, url, finish, fail };
       audio.onended = finish;
       audio.onerror = () => fail(new Error('Audio playback failed.'));
       if (this.paused) return; // stay silent until resume()

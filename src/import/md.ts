@@ -9,7 +9,9 @@ export function markdownBlocks(text: string): BlockSeed[] {
   let inFence = false;
 
   const flush = () => {
-    const merged = normaliseText(para.join(' '));
+    // Code fences are read exactly as written; ordinary paragraphs have their
+    // markdown markup stripped so TTS does not say "asterisk asterisk".
+    const merged = inFence ? normaliseText(para.join(' ')) : stripInline(para.join(' '));
     if (merged) seeds.push({ kind: 'p', text: merged });
     para = [];
   };
@@ -104,7 +106,8 @@ export function stripInline(value: string): string {
       // no lookbehind: in a regex literal it is a parse error on iOS < 16.4 and blanks the app
       .replace(/(^|\W)_([^_\n]+)_(?!\w)/g, '$1$2')
       .replace(/~~([^~]+)~~/g, '$1')
-      .replace(/<[^>]+>/g, '')
+      // Only real tags: inequalities such as "a < b and c > d" are text, not HTML.
+      .replace(/<\/?[A-Za-z][^>]*>/g, '')
       .replace(/\\([\\`*_{}[\]()#+\-.!>])/g, '$1'),
   );
 }

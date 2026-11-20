@@ -138,6 +138,10 @@ function start(job: AlignJob): void {
     return timings;
   });
   const done = (timings: WordTiming[]): void => {
+    // A success that lands after the job timed out is cached above, but it must
+    // not clear the failure count: the model really did miss its budget, and
+    // pretending otherwise defeats the backoff that protects worker memory.
+    if (job.abandoned) return;
     // The model ran, so it is working: a transcript with no usable words is not
     // a failure, only a clip the estimate explains better.
     consecutiveFailures = 0;
@@ -275,6 +279,12 @@ export async function wordTimings(
       if (waiting) settle(waiting, waiting.estimate);
       waiting = job;
     } else {
+      // A running job that timed out frees the slot, but a clip parked in
+      // `waiting` is no longer the one being read. Answer it now instead of
+      // leaving it pending until its own (possibly much longer) timeout; feeding
+      // it to a recogniser that just missed its budget is what builds the
+      // backlog the backoff below is there to break.
+      if (waiting) settle(waiting, waiting.estimate);
       start(job);
     }
   });

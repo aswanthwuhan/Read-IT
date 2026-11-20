@@ -1596,7 +1596,8 @@ describe('reader: full-screen reading', () => {
     await enterFullscreen();
 
     expect(bookChrome()).toBeNull();
-    expect(container.querySelector('.rd-dock')).toBeNull();
+    // The dock stays mounted (hidden) so the sleep timer survives fullscreen.
+    expect(container.querySelector('.rd-dock')?.hasAttribute('hidden')).toBe(true);
     expect(container.querySelector('.rd-chapter-nav')).toBeNull();
     // The book stays: only the chrome goes away.
     expect(sentence('0-0-0')).not.toBeNull();

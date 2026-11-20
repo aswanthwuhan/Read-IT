@@ -3,6 +3,7 @@ import { db, newId } from '../core/db';
 import { isIos } from '../core/platform';
 import type { BookRecord, ColumnMode, DocFormat, ParsedDoc } from '../core/types';
 import { normaliseText } from './blocks';
+import { resetAudioSizeCache } from '../tts/cache';
 import { parseHtmlDocument } from './html';
 import type { LayoutMode } from './pdf';
 import { parseMarkdown } from './md';
@@ -148,13 +149,18 @@ async function saveRecord(doc: ParsedDoc, fileBlob: Blob, layout?: BookRecord['l
 
 /** Remove a book and everything that hangs off it, in one transaction. */
 export async function deleteBook(bookId: string): Promise<void> {
+  let deletedClips = 0;
   await db.transaction('rw', [db.books, db.highlights, db.bookmarks, db.audioCache], async () => {
     await db.highlights.where('bookId').equals(bookId).delete();
     await db.bookmarks.where('bookId').equals(bookId).delete();
     const clips = await db.audioCache.filter((r) => r.bookId === bookId).toArray();
+    deletedClips = clips.length;
     if (clips.length > 0) await db.audioCache.bulkDelete(clips.map((clip) => clip.key));
     await db.books.delete(bookId);
   });
+  // The cache module memoises its byte total; a delete outside it would leave
+  // Storage reporting the removed clips until the next app start.
+  if (deletedClips > 0) resetAudioSizeCache();
 }
 
 /**

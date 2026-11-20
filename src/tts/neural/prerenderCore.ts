@@ -12,6 +12,8 @@ export interface PrerenderItem {
 }
 
 export interface PrerenderOptions {
+  /** The book the clips belong to, so `deleteBook` can reclaim them. */
+  bookId?: string;
   voiceId?: string;
   rate?: number;
   signal?: AbortSignal;
@@ -124,6 +126,7 @@ export async function runPrerender(
             audio,
             durationMs,
             createdAt: Date.now(),
+            bookId: opts.bookId,
           });
           report.synthesised++;
         }

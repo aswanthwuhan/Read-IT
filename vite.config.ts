@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import packageJson from './package.json' with { type: 'json' };
 
-// Cloudflare Pages serves the PWA from /readit/; dev, Capacitor and Tauri need '/'.
-// The build workflow sets VITE_BASE=/readit/ at build time.
+// GitHub Pages serves the PWA from /Read-IT/; dev, Capacitor and Tauri need '/'.
+// The build workflow sets VITE_BASE=/Read-IT/ at build time.
 const rawBase = process.env.VITE_BASE ?? '/';
 const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
 
@@ -47,7 +47,7 @@ export default defineConfig(({ mode }) => ({
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // pdfjs/: decoders, standard fonts and the CMYK profile (~1.2 MB), so Page view works offline
         globPatterns: ['**/*.{js,css,html,woff2}', 'pdfjs/**/*.{wasm,pfb,ttf,icc}'],
-        // SPA deep links (e.g. /readit/read/abc on reload) must land on the shell.
+        // SPA deep links (e.g. /Read-IT/read/abc on reload) must land on the shell.
         navigateFallback: `${base}index.html`,
         // onnxruntime-web wasm (~22 MB) is too big to precache; cache on first use so later launches work offline.
         runtimeCaching: [
@@ -56,6 +56,13 @@ export default defineConfig(({ mode }) => ({
             urlPattern: ({ url }) => url.pathname.includes('/ort/'),
             handler: 'CacheFirst',
             options: { cacheName: 'ort-runtime', expiration: { maxEntries: 10 } },
+          },
+          {
+            // The 10.9 MB G2P lexicon is fetched at runtime; keep it for offline
+            // Kokoro even though it is too large for the 5 MB precache budget.
+            urlPattern: ({ url }) => url.pathname.includes('/lexicon/'),
+            handler: 'CacheFirst',
+            options: { cacheName: 'g2p-lexicon', expiration: { maxEntries: 3 } },
           },
         ],
       },

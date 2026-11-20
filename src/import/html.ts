@@ -46,35 +46,58 @@ export function blocksFromRoot(root: Element): BlockSeed[] {
 }
 
 function walk(el: Element, out: BlockSeed[]): void {
-  for (const child of Array.from(el.children)) {
-    if (SKIP_TAGS.has(child.tagName) || isHidden(child) || isMarginalNote(child)) continue;
+  // A container can hold both bare text ("Hello") and blocks (<p>World</p>).
+  // Iterating only `children` loses the bare text, so walk child *nodes* and
+  // accumulate inline text until a block boundary flushes it into a paragraph.
+  let inline = '';
+  const flushInline = () => {
+    const text = normaliseText(inline);
+    inline = '';
+    if (text) out.push({ kind: 'p', text });
+  };
 
-    const level = headingLevel(child.tagName);
+  for (const child of Array.from(el.childNodes)) {
+    if (child.nodeType === 3) {
+      // Text node: keep it in order with the blocks around it.
+      inline += child.textContent ?? '';
+      continue;
+    }
+    if (child.nodeType !== 1) continue;
+    const element = child as Element;
+    if (SKIP_TAGS.has(element.tagName) || isHidden(element) || isMarginalNote(element)) continue;
+
+    const level = headingLevel(element.tagName);
     if (level > 0) {
-      out.push({ kind: 'h', level, text: textOf(child) });
+      flushInline();
+      out.push({ kind: 'h', level, text: textOf(element) });
       continue;
     }
-    if (child.tagName === 'TABLE') {
-      out.push({ kind: 'table', text: tableText(child) });
+    if (element.tagName === 'TABLE') {
+      flushInline();
+      out.push({ kind: 'table', text: tableText(element) });
       continue;
     }
-    if (child.tagName === 'FIGURE') {
-      out.push({ kind: 'figure', text: figureText(child) });
+    if (element.tagName === 'FIGURE') {
+      flushInline();
+      out.push({ kind: 'figure', text: figureText(element) });
       continue;
     }
-    if (TEXT_BLOCK_TAGS.has(child.tagName)) {
-      out.push({ kind: child.tagName === 'LI' ? 'li' : 'p', text: textOf(child) });
+    if (TEXT_BLOCK_TAGS.has(element.tagName)) {
+      flushInline();
+      out.push({ kind: element.tagName === 'LI' ? 'li' : 'p', text: textOf(element) });
       continue;
     }
 
-    if (containsBlock(child)) {
-      walk(child, out);
+    if (containsBlock(element)) {
+      flushInline();
+      walk(element, out);
     } else {
-      // A div/section that only holds inline content is a paragraph of its own.
-      const text = textOf(child);
-      if (text) out.push({ kind: 'p', text });
+      // An inline-only child (span, b, a bare div) joins the current paragraph
+      // instead of becoming a block of its own mid-sentence.
+      inline += textOf(element);
     }
   }
+  flushInline();
 }
 
 function containsBlock(el: Element): boolean {

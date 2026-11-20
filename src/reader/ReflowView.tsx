@@ -300,6 +300,19 @@ export default function ReflowView({
       onMouseUp={handleSelection}
       onTouchEnd={handleSelection}
       onContextMenu={(event) => event.preventDefault()}
+      tabIndex={0}
+      aria-label="Reading text. Press Enter to open actions for the current sentence."
+      onKeyDown={(event) => {
+        // Keyboard/switch users have no long-press. Enter on the text surface
+        // opens the same selection actions a long-press would, for the current
+        // sentence (or the first one when the reader has no position yet).
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const id = readingId ?? sentences[0]?.id;
+        if (!id) return;
+        event.preventDefault();
+        onSelect([id], (byId.get(id)?.text ?? '').trim());
+      }}
     >
       <p className="rd-eyebrow">{eyebrow}</p>
       <h2 className="rd-chapter-title">{chapter.title}</h2>

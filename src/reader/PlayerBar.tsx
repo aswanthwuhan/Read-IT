@@ -60,6 +60,8 @@ export interface PrerenderProgress {
 }
 
 interface Props {
+  /** Hide the dock without unmounting it: the sleep timer must survive fullscreen. */
+  hidden?: boolean;
   state: PlayState;
   /** "Kokoro" / "Pocket TTS" / "Phone voice" — never an engine class name. */
   engineName: string;
@@ -74,6 +76,8 @@ interface Props {
   /** 1-based position of the spoken sentence inside the chapter. */
   sentenceNumber: number;
   sentenceTotal: number;
+  /** Spoken sentences in the current plan; may be 0 when all blocks are skipped. */
+  sentenceSpokenTotal?: number;
   /** 1-based sentence number being synthesized right now, if any. */
   generating: number | null;
   /** How many upcoming sentences already have audio. */
@@ -140,6 +144,7 @@ const VOICE_GLYPH = (
 );
 
 export default function PlayerBar({
+  hidden = false,
   state,
   engineName,
   engineId,
@@ -150,6 +155,7 @@ export default function PlayerBar({
   cached,
   sentenceNumber,
   sentenceTotal,
+  sentenceSpokenTotal,
   generating,
   readyAhead,
   pages,
@@ -315,7 +321,7 @@ export default function PlayerBar({
   }
 
   return (
-    <div className="rd-dock">
+    <div className="rd-dock" hidden={hidden}>
       <div className="rd-player" role="group" aria-label="Read aloud">
         <div
           className="rd-player-track"
@@ -428,7 +434,7 @@ export default function PlayerBar({
           <button
             type="button"
             className="rd-play"
-            disabled={sentenceTotal === 0}
+            disabled={(sentenceSpokenTotal ?? sentenceTotal) === 0}
             aria-label={playing ? 'Pause' : state === 'paused' ? 'Resume' : 'Play'}
             aria-pressed={playing}
             onClick={onToggle}

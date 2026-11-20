@@ -90,6 +90,15 @@ export default function SelectionBar({
             value={note}
             rows={3}
             onChange={(event) => setNote(event.target.value)}
+            onKeyDown={(event) => {
+              // Escape cancels just the note field, not the whole selection.
+              if (event.key !== 'Escape') return;
+              event.preventDefault();
+              event.stopPropagation();
+              setNote('');
+              setNoteOpen(false);
+              box.current?.focus();
+            }}
             autoFocus
           />
           <div className="rd-note-actions">

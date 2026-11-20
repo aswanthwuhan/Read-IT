@@ -43,7 +43,7 @@ with no admin prompt. The build is unsigned, so SmartScreen shows "Windows prote
 choose **More info → Run anyway**. It needs WebView2, which is already on Windows 10 and 11.
 Details are in [docs/WINDOWS.md](docs/WINDOWS.md).
 
-**PWA.** The web app is hosted on Cloudflare Pages and installs from the browser. On Android
+**PWA.** The web app is hosted on GitHub Pages at /Read-IT/ and installs from the browser. On Android
 Chrome use ⋮ → **Install app**. On iPhone or iPad use Share → **Add to Home Screen**. On desktop
 use the install icon in the address bar. Details are in [docs/PWA.md](docs/PWA.md).
 

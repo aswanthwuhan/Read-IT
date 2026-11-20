@@ -16,18 +16,36 @@ interface SpineSection {
  * lists that file. Per-sentence CFIs are not recorded: the walker drops element
  * references, so a page anchor could only point at the whole spine item.
  */
+/**
+ * The uncompressed size epubjs's JSZip recorded for a spine entry, when that
+ * metadata is available. epubjs 0.3 exposes it as `book.archive.zip.files`;
+ * this is intentionally best-effort — the post-load text cap still applies.
+ */
+function entryUncompressedBytes(book: unknown, href: string): number | undefined {
+  const archive = (book as { archive?: { zip?: { files?: Record<string, unknown> } } }).archive;
+  const files = archive?.zip?.files;
+  if (!files) return undefined;
+  const candidates = [href, href.replace(/^\//, ''), `OPS/${href.replace(/^\//, '')}`, `OEBPS/${href.replace(/^\//, '')}`];
+  for (const name of candidates) {
+    const entry = files[name] as { _data?: { uncompressedSize?: unknown } } | undefined;
+    const size = entry?._data?.uncompressedSize;
+    if (typeof size === 'number' && Number.isFinite(size) && size >= 0) return size;
+  }
+  return undefined;
+}
+
 export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promise<ParsedDoc> {
   if (data.byteLength > EPUB_IMPORT_MAX_BYTES) {
     throw new Error('That EPUB is too large to import (over 100 MB).');
   }
   const book = ePub();
-  // epubjs 0.3.93's ESM entry (the one bundlers pick) only builds the Book; its
-  // UMD bundle is the one that opens by itself. Without this `book.ready` never
-  // settles and an EPUB import would sit there forever.
-  await book.open(data, 'binary');
-  await book.ready;
-
   try {
+    // epubjs 0.3.93's ESM entry (the one bundlers pick) only builds the Book; its
+    // UMD bundle is the one that opens by itself. Without this `book.ready` never
+    // settles and an EPUB import would sit there forever.
+    await book.open(data, 'binary');
+    await book.ready;
+
     const meta = await book.loaded.metadata;
     const title = normaliseText(meta.title) || normaliseText(fallbackTitle) || 'Untitled EPUB';
     const author = normaliseText(meta.creator) || undefined;
@@ -53,6 +71,13 @@ export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promi
       const href = section.href;
       if (!href) continue;
 
+      // epubjs decompresses a spine entry into a string + DOM before its text
+      // can be counted. Check the zip's own size metadata first so a small zip
+      // holding a gigantic, highly-compressible entry cannot OOM the tab.
+      const uncompressed = entryUncompressedBytes(book, href);
+      if (uncompressed !== undefined && uncompressed > EPUB_TEXT_MAX_BYTES) {
+        throw new Error('That EPUB is too large to import (over 500 MB of text).');
+      }
       let chapterDoc: Document;
       try {
         chapterDoc = (await book.load(href)) as Document;

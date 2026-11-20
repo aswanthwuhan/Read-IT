@@ -30,7 +30,7 @@ import { promisify } from 'node:util';
 const execFile = promisify(execFileCallback);
 
 const ARTIFACTS = path.resolve(process.env.IOS_SIM_ARTIFACTS || 'ios-sim-artifacts');
-const URL_BASE = process.env.IOS_SIM_URL || 'https://aswanthwuhan.github.io/readit/';
+const URL_BASE = process.env.IOS_SIM_URL || 'https://aswanthwuhan.github.io/Read-IT/';
 const DRIVER = (process.env.IOS_SIM_DRIVER || 'appium').toLowerCase();
 const UDID = process.env.IOS_SIM_UDID || '';
 const PLATFORM_VERSION = process.env.IOS_SIM_PLATFORM_VERSION || '';

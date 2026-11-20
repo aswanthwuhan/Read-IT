@@ -167,7 +167,10 @@ export default function ReaderView() {
 
   const fontSize = useSetting<number>(FONT_KEY, DEFAULT_FONT);
   const lineHeight = useSetting<number>(LINE_KEY, 1.7); // DESIGN.md reading rhythm; 1.5 felt cramped in Literata
-  const rate = useSetting<number>(RATE_KEY, 1);
+  // A backup or a legacy row can hold a string here; a raw `.toFixed()` in the
+  // player bar would blank the whole reader. Fall back to the default rate.
+  const rateValue = useSetting<number>(RATE_KEY, 1);
+  const rate = typeof rateValue === 'number' && Number.isFinite(rateValue) ? Math.min(2, Math.max(0.5, rateValue)) : 1;
   const voiceId = useSetting<string>(VOICE_KEY, '');
   const engineChoice = useSetting<string>(ENGINE_SETTING, 'auto');
   const skip = useSkipOptions();
@@ -705,6 +708,7 @@ export default function ReaderView() {
       engine: info.engine,
       items,
       startIndex,
+      bookId,
       voiceId: engineVoiceId(info, voiceRef.current),
       rate: rateRef.current,
       prefetchAhead: prefetchRef.current,
@@ -1191,7 +1195,7 @@ export default function ReaderView() {
       const report = await prerenderChapter(
         info.engine,
         items,
-        { voiceId: engineVoiceId(info, voiceRef.current), rate: rateRef.current, signal: controller.signal },
+        { bookId, voiceId: engineVoiceId(info, voiceRef.current), rate: rateRef.current, signal: controller.signal },
         (p) => setProgress({ done: p.done, total: p.total })
       );
       if (!report.aborted) {
@@ -1352,7 +1356,7 @@ export default function ReaderView() {
           const report = await prerenderChapter(
             info.engine,
             job.items,
-            { voiceId, rate, signal: controller.signal },
+            { bookId, voiceId, rate, signal: controller.signal },
             (p) => {
               setProgress(
                 selection.kind === 'chapters'
@@ -1610,9 +1614,30 @@ export default function ReaderView() {
     if (!open) return;
     sheetBody.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (typeOpen) setTypeOpen(false);
-      else setDrawer('none');
+      if (event.key === 'Escape') {
+        if (typeOpen) setTypeOpen(false);
+        else setDrawer('none');
+        return;
+      }
+      // aria-modal sheets must contain Tab: otherwise focus walks into the
+      // player and page controls behind the overlay.
+      if (event.key !== 'Tab') return;
+      const body = sheetBody.current;
+      if (!body) return;
+      const focusable = [...body.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])')];
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (!body.contains(document.activeElement)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1928,8 +1953,10 @@ export default function ReaderView() {
         </nav>
       ) : null}
 
-      {showChrome ? (
-        <PlayerBar
+      {/* Keep the dock mounted when the chrome hides: its sleep timer (and its
+          "End of chapter" choice) must survive a fullscreen toggle. */}
+      <PlayerBar
+          hidden={!showChrome}
           state={playState}
           engineName={engineName(engineInfo)}
           engineId={engineInfo?.engine.id ?? null}
@@ -1942,6 +1969,7 @@ export default function ReaderView() {
           sentenceTotal={index.chapters[chapterIndex]?.length ?? 0}
           generating={generatingNumber}
           readyAhead={readyAhead}
+          sentenceSpokenTotal={plan?.items.length ?? 0}
           pages={showPage ? null : pageNav}
           fromHere={showPage ? browsing : mode === 'text' && !cursorOnScreen && playState !== 'playing'}
           selection={
@@ -1968,8 +1996,7 @@ export default function ReaderView() {
           onSleepAtChapterEndChange={(atEnd) => {
             sleepAtChapterEnd.current = atEnd;
           }}
-        />
-      ) : null}
+      />
 
       {/* The way out stays reachable even while the bars are hidden: it fades
           but keeps its place in the tab order (focus brings it back). Top

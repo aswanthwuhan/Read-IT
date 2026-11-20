@@ -68,6 +68,14 @@ export default function ImportLayoutSheet({ count, modelReady, onAnswer, onCance
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       const current = document.activeElement;
+      // During the download every control is disabled, so `focusable` is empty
+      // and focus has dropped to <body>. Keep it inside the sheet rather than
+      // letting Tab wander into the Library behind the modal.
+      if (!sheet.contains(current)) {
+        event.preventDefault();
+        (focusable[0] ?? sheet).focus();
+        return;
+      }
       if (event.shiftKey && (current === first || !sheet.contains(current))) {
         event.preventDefault();
         last.focus();
