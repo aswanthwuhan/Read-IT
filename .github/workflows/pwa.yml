@@ -43,6 +43,11 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # The ORT runtime is generated from node_modules and is gitignored; the
+      # ortAssets test verifies it, so copy it in before testing.
+      - name: Copy ORT assets
+        run: node scripts/copy-ort.mjs
+
       - name: Test
         run: pnpm test
 

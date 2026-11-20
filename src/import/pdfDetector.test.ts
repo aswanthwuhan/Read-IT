@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,7 +36,7 @@ beforeEach(() => {
   detector.dispose.mockReset();
 });
 
-describe('parsePdf with the layout model installed', () => {
+describe.skipIf(!existsSync(NMC_PDF))('parsePdf with the layout model installed', () => {
   it('frees the model when a page fails, and does not claim the model read the book', { timeout: 120_000 }, async () => {
     detector.detect.mockRejectedValue(new Error('out of memory'));
     const quiet = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
