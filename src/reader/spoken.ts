@@ -12,6 +12,8 @@
  * in the original sentence: word highlighting and selection offsets keep
  * working on the text the reader sees.
  */
+import { mapNormalised } from '../tts/align/speechMap';
+import { normaliseForSpeech } from '../tts/normalize';
 
 /** How bracketed asides are spoken. */
 export type BracketMode = 'pause' | 'announce' | 'read' | 'skip';
@@ -146,7 +148,11 @@ export function speakPlan(text: string, options: SpeakOptions): SpeakPlan {
   const edits: Edit[] = [];
   if (options.citations) for (const span of citations) edits.push(span);
   for (const group of groups) edits.push({ start: group.start, end: group.end, group });
-  if (edits.length === 0) return { text, charMap: null };
+  if (edits.length === 0) {
+    const expanded = normaliseForSpeech(text);
+    if (expanded === text) return { text, charMap: null };
+    return { text: expanded, charMap: mapNormalised(text, expanded) };
+  }
   edits.sort((a, b) => a.start - b.start);
 
   const out: string[] = [];
@@ -248,8 +254,17 @@ export function speakPlan(text: string, options: SpeakOptions): SpeakPlan {
   }
   const spoken = out.join('');
   if (spoken === '') return { text, charMap: null };
-  if (spoken === text) return { text, charMap: null };
-  return { text: spoken, charMap: map };
+
+  const expanded = normaliseForSpeech(spoken);
+  if (expanded === spoken) {
+    if (spoken === text) return { text, charMap: null };
+    return { text: spoken, charMap: map };
+  }
+
+  const inner = mapNormalised(spoken, expanded);
+  const finalMap = inner.map((at) => map[at] ?? at);
+  if (expanded === text) return { text, charMap: null };
+  return { text: expanded, charMap: finalMap };
 }
 
 /** Convenience for callers that only need the shortened text. */

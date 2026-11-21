@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as normalize from '../tts/normalize';
 import { speakPlan, spokenText, type SpeakOptions } from './spoken';
 
 const CITATIONS: SpeakOptions = { citations: true, brackets: 'read' };
@@ -44,8 +45,12 @@ function expectWordsMapped(
 }
 
 describe('speakPlan: citations', () => {
-  it('leaves the sentence alone when nothing applies', () => {
-    expect(speakPlan('Aspirin works [12].', NOTHING)).toEqual({ text: 'Aspirin works [12].', charMap: null });
+  it('leaves citations alone but normalises the number when both switches are off', () => {
+    const original = 'Aspirin works [12].';
+    const plan = speakPlan(original, NOTHING);
+    expect(plan.text).toBe('Aspirin works [twelve].');
+    expect(plan.charMap).toHaveLength(plan.text.length);
+    expectMapped(original, plan);
   });
 
   it('drops numeric citations', () => {
@@ -63,16 +68,16 @@ describe('speakPlan: citations', () => {
 
   it('keeps a dose in parentheses that is not a citation', () => {
     expect(spokenText('Give 2 mg (twice daily) with food.', CITATIONS)).toBe(
-      'Give 2 mg (twice daily) with food.'
+      'Give two milligrams (twice daily) with food.'
     );
-    expect(spokenText('See (Fig. 2) for the curve.', CITATIONS)).toBe('See (Fig. 2) for the curve.');
+    expect(spokenText('See (Fig. 2) for the curve.', CITATIONS)).toBe('See (figure two) for the curve.');
   });
 
   it('keeps citations untouched when the citation switch is off', () => {
     expect(spokenText('Metformin (Smith et al., 2019) lowers glucose.', { citations: false, brackets: 'announce' })).toBe(
-      'Metformin (Smith et al., 2019) lowers glucose.'
+      'Metformin (Smith et al., twenty nineteen) lowers glucose.'
     );
-    expect(spokenText('It works [12].', { citations: false, brackets: 'skip' })).toBe('It works [12].');
+    expect(spokenText('It works [12].', { citations: false, brackets: 'skip' })).toBe('It works [twelve].');
   });
 
   it('never announces a citation as an aside', () => {
@@ -109,7 +114,7 @@ describe('speakPlan: brackets, pause', () => {
   });
 
   it('reads a sentence-initial aside without a leading comma', () => {
-    expect(spokenText('(See Fig. 2) Capsaicin burns.', PAUSE)).toBe('See Fig. 2, Capsaicin burns.');
+    expect(spokenText('(See Fig. 2) Capsaicin burns.', PAUSE)).toBe('See figure two, Capsaicin burns.');
   });
 
   it('never says bracket', () => {
@@ -156,13 +161,13 @@ describe('speakPlan: brackets, announce', () => {
 
   it('announces an example', () => {
     expect(spokenText('Give (e.g. atropine) for bradycardia.', ANNOUNCE)).toBe(
-      'Give, in brackets, e.g. atropine, for bradycardia.'
+      'Give, in brackets, for example atropine, for bradycardia.'
     );
   });
 
   it('announces a cross-reference', () => {
     expect(spokenText('See (Fig. 2) for the curve.', ANNOUNCE)).toBe(
-      'See, in brackets, Fig. 2, for the curve.'
+      'See, in brackets, figure two, for the curve.'
     );
   });
 
@@ -180,16 +185,16 @@ describe('speakPlan: brackets, announce', () => {
 
   it('announces doses in brackets too', () => {
     expect(spokenText('Give 5 mg/kg (bolus) slowly.', ANNOUNCE)).toBe(
-      'Give 5 mg/kg, in brackets, bolus, slowly.'
+      'Give five milligrams per kilogram, in brackets, bolus, slowly.'
     );
     expect(spokenText('A dose (5 mg/kg) is safe.', ANNOUNCE)).toBe(
-      'A dose, in brackets, 5 mg/kg, is safe.'
+      'A dose, in brackets, five milligrams per kilogram, is safe.'
     );
   });
 
   it('announces an aside at the start of a sentence', () => {
     expect(spokenText('(See Fig. 2) Capsaicin activates TRPV1.', ANNOUNCE)).toBe(
-      'In brackets, See Fig. 2, Capsaicin activates TRPV1.'
+      'In brackets, See figure two, Capsaicin activates TRPV1.'
     );
   });
 
@@ -227,12 +232,12 @@ describe('speakPlan: brackets, announce', () => {
   });
 
   it('reads an unclosed bracket as written', () => {
-    expect(spokenText('Dose (5 mg/kg', ANNOUNCE)).toBe('Dose (5 mg/kg');
-    expect(spokenText('Trial (phase 2 (dose)', ANNOUNCE)).toBe('Trial (phase 2 (dose)');
+    expect(spokenText('Dose (5 mg/kg', ANNOUNCE)).toBe('Dose (five milligrams per kilogram');
+    expect(spokenText('Trial (phase 2 (dose)', ANNOUNCE)).toBe('Trial (phase two (dose)');
   });
 
   it('leaves a stray closing bracket as a character', () => {
-    expect(spokenText('Give 5 mg/kg) daily.', ANNOUNCE)).toBe('Give 5 mg/kg) daily.');
+    expect(spokenText('Give 5 mg/kg) daily.', ANNOUNCE)).toBe('Give five milligrams per kilogram) daily.');
   });
 
   it('maps the announced words back to the original sentence', () => {
@@ -254,23 +259,22 @@ describe('speakPlan: brackets, announce', () => {
 });
 
 describe('speakPlan: brackets, read and skip', () => {
-  it('reads brackets exactly as written in read mode', () => {
+  it('reads brackets as written while still normalising the digits', () => {
     const original = 'Give 2 mg (twice daily) with food.';
-    expect(speakPlan(original, { citations: false, brackets: 'read' })).toEqual({
-      text: original,
-      charMap: null,
-    });
+    const plan = speakPlan(original, { citations: false, brackets: 'read' });
+    expect(plan.text).toBe('Give two milligrams (twice daily) with food.');
+    expectMapped(original, plan);
   });
 
   it('drops parenthetical and square asides in skip mode', () => {
     expect(spokenText('Give 2 mg (twice daily) [as above] with food.', SKIP)).toBe(
-      'Give 2 mg with food.'
+      'Give two milligrams with food.'
     );
   });
 
   it('keeps citations untouched by skip mode when citations are off', () => {
     expect(spokenText('Metformin (Smith et al., 2019) is used.', { citations: false, brackets: 'skip' })).toBe(
-      'Metformin (Smith et al., 2019) is used.'
+      'Metformin (Smith et al., twenty nineteen) is used.'
     );
   });
 
@@ -290,7 +294,103 @@ describe('speakPlan: brackets, read and skip', () => {
   it('maps a word after a skipped aside to its real position', () => {
     const original = 'Give 2 mg (twice daily) with food.';
     const plan = speakPlan(original, SKIP);
-    expect(plan.text).toBe('Give 2 mg with food.');
+    expect(plan.text).toBe('Give two milligrams with food.');
     expect(plan.charMap?.[plan.text.indexOf('with')]).toBe(original.indexOf('with'));
+  });
+});
+
+describe('speakPlan: composition maps back through edits and normalisation', () => {
+  const PAUSE: SpeakOptions = { citations: true, brackets: 'pause' };
+
+  it('maps a late expansion after a removed citation to its local source', () => {
+    const original = 'It cost €1.2bn [12].';
+    const plan = speakPlan(original, PAUSE);
+    expect(plan.text).toBe('It cost one point two billion euros.');
+    expectMapped(original, plan);
+    expectWordsMapped(original, plan, ['It cost']);
+    const expansion = plan.text.indexOf('one point two billion euros');
+    for (let i = expansion; i < plan.text.length - 1; i += 1) {
+      if (/\s/.test(plan.text[i]!)) continue;
+      const at = plan.charMap![i]!;
+      expect(at, plan.text[i]).toBeGreaterThanOrEqual(original.indexOf('€'));
+      expect(at, plan.text[i]).toBeLessThanOrEqual(original.indexOf('n'));
+    }
+    expect(plan.charMap?.[plan.text.lastIndexOf('.')]).toBe(original.lastIndexOf('.'));
+  });
+
+  it('maps words and expansions through an announced aside', () => {
+    const original = 'Give 5 mg/kg (bolus) slowly.';
+    const plan = speakPlan(original, ANNOUNCE);
+    expectMapped(original, plan);
+    expectWordsMapped(original, plan, ['bolus', 'slowly']);
+    const expansion = plan.text.indexOf('five milligrams per kilogram');
+    for (let i = expansion; i < expansion + 'five milligrams per kilogram'.length; i += 1) {
+      if (/\s/.test(plan.text[i]!)) continue;
+      const at = plan.charMap![i]!;
+      expect(at, plan.text[i]).toBeGreaterThanOrEqual(original.indexOf('5'));
+      expect(at, plan.text[i]).toBeLessThan(original.indexOf('('));
+    }
+  });
+
+  it('maps an expansion after a skipped aside to its own digit', () => {
+    const original = 'Give 2 mg (twice daily) with food.';
+    const plan = speakPlan(original, SKIP);
+    expect(plan.text).toBe('Give two milligrams with food.');
+    expectMapped(original, plan);
+    expectWordsMapped(original, plan, ['Give', 'with food']);
+    const expansion = plan.text.indexOf('two milligrams');
+    for (let i = expansion; i < expansion + 'two milligrams'.length; i += 1) {
+      if (/\s/.test(plan.text[i]!)) continue;
+      const at = plan.charMap![i]!;
+      expect(at, plan.text[i]).toBeGreaterThanOrEqual(original.indexOf('2'));
+      expect(at, plan.text[i]).toBeLessThan(original.indexOf('('));
+    }
+  });
+
+  it('leaves already-normalised text alone (no second pass)', () => {
+    const original = 'It cost one point two billion euros.';
+    expect(speakPlan(original, NOTHING)).toEqual({ text: original, charMap: null });
+  });
+
+  it('normalises a sentence exactly once, even with edits', () => {
+    const spy = vi.spyOn(normalize, 'normaliseForSpeech');
+    try {
+      speakPlan('It cost €1.2bn [12].', PAUSE);
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockClear();
+      speakPlan('A plain sentence.', NOTHING);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('speakPlan: normalisation', () => {
+  const PAUSE: SpeakOptions = { citations: true, brackets: 'pause' };
+
+  it('expands money and maps every spoken character back to the page', () => {
+    const original = 'It cost €1.2bn.';
+    const plan = speakPlan(original, PAUSE);
+    expect(plan.text).toBe('It cost one point two billion euros.');
+    expect(plan.charMap).toHaveLength(plan.text.length);
+    expectMapped(original, plan);
+  });
+
+  it('removes a citation and still expands the number beside it', () => {
+    const original = 'It cost €1.2bn [12].';
+    const plan = speakPlan(original, PAUSE);
+    expect(plan.text).toBe('It cost one point two billion euros.');
+    expect(plan.text).not.toContain('[12]');
+    expect(plan.charMap).toHaveLength(plan.text.length);
+    expectMapped(original, plan);
+  });
+
+  it('keeps the pause shape for a plain sentence', () => {
+    const original = 'The system (ANS) acts.';
+    const plan = speakPlan(original, PAUSE);
+    expect(plan.text).toBe('The system, ANS, acts.');
+    expect(plan.charMap).toHaveLength(plan.text.length);
+    expectWordsMapped(original, plan, ['ANS', 'acts']);
   });
 });

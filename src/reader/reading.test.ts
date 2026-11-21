@@ -128,7 +128,7 @@ describe('planChapter', () => {
       { ...DEFAULT_SKIP, brackets: 'skip' },
       0,
     );
-    expect(plan.items[0]?.spoken).toBe('Give 2 mg now.');
+    expect(plan.items[0]?.spoken).toBe('Give two milligrams now.');
   });
 });
 
