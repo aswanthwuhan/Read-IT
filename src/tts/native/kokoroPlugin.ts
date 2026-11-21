@@ -121,6 +121,8 @@ export interface KokoroPluginApi {
       sid?: number;
       speed?: number;
       threads?: number;
+      /** Pre-tokenised Kokoro phonemes; one inner array per sentence. */
+      tokens?: string[][];
     }
   ): Promise<KokoroSynthesizeResult>;
   stop(): Promise<{ stopped: boolean }>;

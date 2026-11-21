@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { phonemizeWithLexicon } from './index';
+import { phonemizeWithLexicon, tokensFor } from './index';
 
 /**
  * The real dictionaries, served through a fetch stub so the production load
@@ -85,10 +85,36 @@ describe('Misaki G2P', () => {
     ]);
   });
 
+  it('produces pre-tokenised phonemes for the native sherpa path', async () => {
+    // Native Android uses these instead of sherpa's lexicon frontend, so its
+    // spelling follows the same rules as the web engine.
+    expect(codes((await phonemizeWithLexicon('High')).replaceAll(' ', ''))).toEqual([
+      0x0068, 0x02c8, 0x0049,
+    ]);
+    expect(await tokensFor('High')).toEqual(['h', 'ˈ', 'I']);
+    expect(await tokensFor('a cat')).toEqual(['ɐ', 'k', 'ˈ', 'æ', 't']);
+    expect((await tokensFor('5 km') ?? []).length).toBeGreaterThan(4);
+  });
+
   it('reads a heteronym from its part of speech', async () => {
     // "I read it" is present tense; the gold dictionary's DEFAULT is present.
     const present = await phonemizeWithLexicon('I read the book');
     expect(present).toContain('ɹˈid');
     expect(present).not.toContain('ɹˈɛd');
+  });
+
+  it('reads a standalone capital A as a letter, not the article "uh"', async () => {
+    expect(await phonemizeWithLexicon('plan A')).toContain('\u02c8A');
+    expect(await phonemizeWithLexicon('grade A')).not.toContain('ɐ');
+    // A capital A followed by a noun is still the article.
+    expect(await phonemizeWithLexicon('A cat')).toContain('ɐ');
+  });
+
+  it('reads a negative number as "minus …", not an em-dash', async () => {
+    for (const text of ['-5', '-0.5', '−5']) {
+      const spoken = await phonemizeWithLexicon(text);
+      expect(spoken).not.toContain('—');
+      expect(spoken.toLowerCase()).toContain('m');
+    }
   });
 });

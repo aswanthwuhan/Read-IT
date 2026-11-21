@@ -5,6 +5,7 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import com.k2fsa.sherpa.onnx.GeneratedAudio;
+import com.k2fsa.sherpa.onnx.GenerationConfig;
 import com.k2fsa.sherpa.onnx.OfflineTts;
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig;
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig;
@@ -73,6 +74,8 @@ public final class KokoroTtsEngine {
     /** Key of the model build in memory ({@code int8} / {@code fp32}); null when released. */
     private volatile String modelKey;
     private volatile String provider = DEFAULT_PROVIDER;
+    /** Token symbols in the loaded model's tokens.txt; pre-phonemised input is checked against this. */
+    private volatile java.util.Set<String> knownTokens = java.util.Collections.emptySet();
 
     private KokoroTtsEngine() {}
 
@@ -180,14 +183,44 @@ public final class KokoroTtsEngine {
         this.modelDirPath = path;
         this.modelKey = model == null ? KokoroModel.KEY_FP32 : model.key();
         this.provider = wantedProvider;
+        this.knownTokens = readTokens(new File(modelDir, KokoroModel.TOKENS_FILE));
         this.tts = created;
         Log.i(TAG, String.format(Locale.US,
                 "Kokoro ready: %d Hz, %d speakers", sampleRate, voiceCount));
     }
 
+    /** First field of each tokens.txt line — the strings sherpa's token path expects. */
+    private static java.util.Set<String> readTokens(File file) {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        try {
+            for (String line : java.nio.file.Files.readAllLines(
+                    file.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty()) continue;
+                out.add(trimmed.split("\\s+", 2)[0]);
+            }
+        } catch (IOException | RuntimeException e) {
+            Log.w(TAG, "could not read tokens.txt", e);
+        }
+        return java.util.Collections.unmodifiableSet(out);
+    }
+
+    /** Pre-phonemised tokens are only used when every one is in the model's vocabulary. */
+    private boolean tokensUsable(String[][] tokens) {
+        if (tokens == null || tokens.length == 0) return false;
+        for (String[] sentence : tokens) {
+            if (sentence == null || sentence.length == 0) return false;
+            for (String token : sentence) {
+                if (token == null || !knownTokens.contains(token)) return false;
+            }
+        }
+        return true;
+    }
+
     public synchronized void release() {
         OfflineTts current = tts;
         tts = null;
+        knownTokens = java.util.Collections.emptySet();
         modelDirPath = null;
         modelKey = null;
         voiceCount = 0;
@@ -213,6 +246,18 @@ public final class KokoroTtsEngine {
      */
     public synchronized SynthResult synthesize(
             String text, int sid, float speed, StopSignal stop) throws IOException {
+        return synthesize(text, sid, speed, stop, null);
+    }
+
+    /**
+     * Same as above, but with tokens pre-phonemised by the app's G2P. sherpa's
+     * token path skips its lexicon frontend, so Android reads the same "High",
+     * "a", inflections and numbers as the web build. A token outside the
+     * model's vocabulary, or a failed generation, falls back to raw text.
+     */
+    public synchronized SynthResult synthesize(
+            String text, int sid, float speed, StopSignal stop, String[][] tokens)
+            throws IOException {
         OfflineTts current = tts;
         if (current == null) {
             throw new IOException("Kokoro model is not loaded");
@@ -229,17 +274,45 @@ public final class KokoroTtsEngine {
         float rate = speed <= 0f ? 1f : Math.max(0.5f, Math.min(2f, speed));
 
         long startNanos = SystemClock.elapsedRealtimeNanos();
-        GeneratedAudio audio;
-        if (stop != null) {
-            Function1<float[], Integer> callback = new Function1<float[], Integer>() {
-                @Override
-                public Integer invoke(float[] samples) {
-                    return stop.isStopped() ? 0 : 1;
+        GeneratedAudio audio = null;
+        final boolean useTokens = tokensUsable(tokens);
+        if (useTokens) {
+            try {
+                GenerationConfig config = new GenerationConfig();
+                config.setSid(speaker);
+                config.setSpeed(rate);
+                config.setTokens(tokens);
+                if (stop != null) {
+                    Function1<float[], Integer> callback = new Function1<float[], Integer>() {
+                        @Override
+                        public Integer invoke(float[] samples) {
+                            return stop.isStopped() ? 0 : 1;
+                        }
+                    };
+                    audio = current.generateWithConfigAndCallback(trimmed, config, callback);
+                } else {
+                    audio = current.generateWithConfig(trimmed, config);
                 }
-            };
-            audio = current.generateWithCallback(trimmed, speaker, rate, callback);
-        } else {
-            audio = current.generate(trimmed, speaker, rate);
+                if (audio == null || audio.getSamples() == null || audio.getSamples().length == 0) {
+                    throw new IOException("Kokoro returned no audio from the token path");
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "token path failed; falling back to text", t);
+                audio = null;
+            }
+        }
+        if (audio == null) {
+            if (stop != null) {
+                Function1<float[], Integer> callback = new Function1<float[], Integer>() {
+                    @Override
+                    public Integer invoke(float[] samples) {
+                        return stop.isStopped() ? 0 : 1;
+                    }
+                };
+                audio = current.generateWithCallback(trimmed, speaker, rate, callback);
+            } else {
+                audio = current.generate(trimmed, speaker, rate);
+            }
         }
         long elapsedMs = (SystemClock.elapsedRealtimeNanos() - startNanos) / 1_000_000L;
 

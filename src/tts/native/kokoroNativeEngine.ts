@@ -7,6 +7,7 @@
  * current one plays, which hides most of the model latency on a phone CPU.
  */
 import { getSetting, setSetting } from '../../core/settings';
+import { tokensFor } from '../kokoro/g2p/index';
 import type { SpeakEvents, TtsEngine, TtsVoice } from '../../core/types';
 import { planChunks } from '../neural/clauseChunk';
 import { splitForModel } from '../neural/modelText';
@@ -283,7 +284,12 @@ class KokoroNativeEngine implements TtsEngine {
     const blobs: Blob[] = [];
     for (const clause of splitForModel(trimmed)) {
       if (generation !== this.generation) throw new Error('Kokoro synthesis was cancelled.');
-      const result = await Kokoro.synthesize({ text: clause, sid, speed, threads, model });
+      // Pre-phonemise in JS: Android then uses the same Misaki rules as the web
+      // engine (correct "High", "a", inflections and numbers) and sherpa skips
+      // its own lexicon pass. On an offline first run tokensFor() is null and
+      // the plugin falls back to raw text, so playback never stops.
+      const tokens = await tokensFor(clause);
+      const result = await Kokoro.synthesize({ text: clause, sid, speed, threads, model, tokens: tokens ? [tokens] : undefined });
       if (result.cancelled) throw new Error('Kokoro synthesis was cancelled.');
       if (!result.wavBase64) throw new Error('Kokoro returned no audio.');
       blobs.push(base64ToWavBlob(result.wavBase64));

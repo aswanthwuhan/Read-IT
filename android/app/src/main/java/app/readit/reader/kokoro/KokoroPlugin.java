@@ -393,6 +393,23 @@ public class KokoroPlugin extends Plugin {
 
     // -------------------------------------------------------------- synthesize
 
+    /** Pre-tokenised phonemes from the app's G2P; null when the caller sent no tokens. */
+    private static String[][] tokensFrom(PluginCall call) {
+        JSArray all = call.getArray("tokens");
+        if (all == null || all.length() == 0) return null;
+        String[][] out = new String[all.length()][];
+        for (int i = 0; i < all.length(); i++) {
+            org.json.JSONArray sentence = all.optJSONArray(i);
+            if (sentence == null || sentence.length() == 0) return null;
+            String[] words = new String[sentence.length()];
+            for (int j = 0; j < sentence.length(); j++) {
+                words[j] = sentence.optString(j, null);
+            }
+            out[i] = words;
+        }
+        return out;
+    }
+
     @PluginMethod
     public void synthesize(PluginCall call) {
         String text = call.getString("text", "");
@@ -412,6 +429,7 @@ public class KokoroPlugin extends Plugin {
         float speed = speedArg == null || speedArg <= 0f ? 1.0f : speedArg;
         Integer threadsArg = call.getInt("threads", null);
         final int myEpoch = epoch;
+        final String[][] tokens = tokensFrom(call);
         KokoroModel.Descriptor wanted = requested(call);
 
         try {
@@ -448,7 +466,8 @@ public class KokoroPlugin extends Plugin {
                             text,
                             sid,
                             speed,
-                            () -> myEpoch != epoch);
+                            () -> myEpoch != epoch,
+                            tokens);
 
                     if (synth.cancelled || synth.wav == null) {
                         resolveCancelled(call);

@@ -22,7 +22,13 @@ import { LetterToSound } from './misaki/letter-to-sound';
 import { Lexicon } from './misaki/lexicon';
 import type { GoldValue } from './misaki/lexicon';
 
-const VOCAB: Set<string> = new Set(Object.keys(JSON.parse(vocabRaw).model.vocab));
+// The dictionaries use syllabic-consonant and cedilla combining marks that the
+// tokenizer vocabulary does not list on its own but accepts attached to a phone.
+const VOCAB: Set<string> = new Set([
+  ...Object.keys(JSON.parse(vocabRaw).model.vocab),
+  '\u0329',
+  '\u0327',
+]);
 const BASE = import.meta.env.BASE_URL;
 const LEXICON_URL = `${BASE}lexicon/lexicon-en-us.txt`;
 const GOLD_URL = `${BASE}lexicon/us_gold.json`;
@@ -101,7 +107,10 @@ const SMALL_NUMBERS = [
   'seventeen', 'eighteen', 'nineteen',
 ];
 const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
-const SCALES = ['', 'thousand', 'million', 'billion', 'trillion'];
+const SCALES = [
+  '', 'thousand', 'million', 'billion', 'trillion', 'quadrillion', 'quintillion',
+  'sextillion', 'septillion', 'octillion', 'nonillion', 'decillion',
+];
 
 function underThousand(n: number): string[] {
   const out: string[] = [];
@@ -134,6 +143,9 @@ function numberWords(token: string): string[] {
     value /= 1000n;
     scale += 1;
   }
+  // Beyond the largest named scale, read the digits individually so the number
+  // is still spoken instead of disappearing from the audio.
+  if (out.length === 0) return [...token].map((digit) => SMALL_NUMBERS[Number(digit)]);
   return out;
 }
 
@@ -197,6 +209,22 @@ export async function phonemizeWithLexicon(text: string): Promise<string> {
   const g2p = await loadG2P();
   if (g2p) return filterVocab(g2p.phonemize(text).phonemes);
   return fallbackPhonemize(text);
+}
+
+/**
+ * Pre-tokenised Kokoro phonemes for sherpa-onnx's native TTS path. Sending
+ * these instead of raw text gives Android the same pronunciation rules the web
+ * engine uses, and skips sherpa's own lexicon frontend for each sentence.
+ * Returns null when the dictionaries are not available (offline first run), so
+ * the caller can fall back to sending text.
+ */
+export async function tokensFor(text: string): Promise<string[] | null> {
+  const phonemes = await phonemizeWithLexicon(text);
+  // Kokoro's vocabulary holds one phoneme (or punctuation mark) per token;
+  // phonemizeWithLexicon only spaces words, so split by code point and drop
+  // those word separators.
+  const tokens = Array.from(phonemes).filter((ch) => ch !== ' ' && VOCAB.has(ch));
+  return tokens.length > 0 ? tokens : null;
 }
 
 /** Warm the dictionaries in the background so the first sentence is not delayed. */
