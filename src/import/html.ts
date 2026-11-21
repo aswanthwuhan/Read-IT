@@ -10,8 +10,37 @@ import { buildChapters, chapterFromSeeds, normaliseText, type BlockSeed } from '
 const SKIP_TAGS = new Set([
   'SCRIPT', 'STYLE', 'NOSCRIPT', 'HEAD', 'TITLE', 'META', 'LINK', 'TEMPLATE',
   'NAV', 'IFRAME', 'OBJECT', 'EMBED', 'FORM', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'SVG',
-  'ASIDE',
 ]);
+
+const EPUB_OPS_NS = 'http://www.idpf.org/2007/ops';
+const NOTE_TYPES = new Set(['footnote', 'endnote', 'rearnote']);
+
+/**
+ * `epub:type` is a space-separated list of semantics. In an XHTML spine file the
+ * attribute is namespaced, so read both the qualified and the namespaced form.
+ */
+function epubTypes(el: Element): string[] {
+  const raw = el.getAttribute('epub:type') ?? el.getAttributeNS(EPUB_OPS_NS, 'type') ?? '';
+  return raw.split(/\s+/).filter(Boolean);
+}
+
+/**
+ * XHTML is parsed as XML by epub.js, where `tagName` keeps the source's lower
+ * case, while an HTML document reports upper case. Comparing upper-cased local
+ * names is the only form that works for both.
+ */
+function tagOf(el: Element): string {
+  return (el.localName || el.tagName).toUpperCase();
+}
+
+/**
+ * A note aside is the note's own text ("¹ Smith 2019, p. 4"). It belongs to the
+ * page but not inside the sentence that references it, so it becomes a footnote
+ * block and stays out of the paragraph text.
+ */
+function isNoteAside(el: Element): boolean {
+  return tagOf(el) === 'ASIDE' && epubTypes(el).some((type) => NOTE_TYPES.has(type));
+}
 
 const TEXT_BLOCK_TAGS = new Set(['P', 'LI', 'BLOCKQUOTE', 'PRE', 'DT', 'DD', 'CAPTION']);
 
@@ -64,27 +93,37 @@ function walk(el: Element, out: BlockSeed[]): void {
     }
     if (child.nodeType !== 1) continue;
     const element = child as Element;
-    if (SKIP_TAGS.has(element.tagName) || isHidden(element) || isMarginalNote(element)) continue;
 
-    const level = headingLevel(element.tagName);
+    // Footnotes used to vanish with the whole <aside>. Keep the note as a
+    // footnote block (visible, skipped while reading unless that switch is on);
+    // any other aside is a sidebar and stays out of the flow, as before.
+    if (tagOf(element) === 'ASIDE') {
+      flushInline();
+      if (isNoteAside(element)) out.push({ kind: 'footnote', text: textOf(element) });
+      continue;
+    }
+
+    if (SKIP_TAGS.has(tagOf(element)) || isHidden(element) || isMarginalNote(element)) continue;
+
+    const level = headingLevel(tagOf(element));
     if (level > 0) {
       flushInline();
       out.push({ kind: 'h', level, text: textOf(element) });
       continue;
     }
-    if (element.tagName === 'TABLE') {
+    if (tagOf(element) === 'TABLE') {
       flushInline();
       out.push({ kind: 'table', text: tableText(element) });
       continue;
     }
-    if (element.tagName === 'FIGURE') {
+    if (tagOf(element) === 'FIGURE') {
       flushInline();
       out.push({ kind: 'figure', text: figureText(element) });
       continue;
     }
-    if (TEXT_BLOCK_TAGS.has(element.tagName)) {
+    if (TEXT_BLOCK_TAGS.has(tagOf(element))) {
       flushInline();
-      out.push({ kind: element.tagName === 'LI' ? 'li' : 'p', text: textOf(element) });
+      out.push({ kind: tagOf(element) === 'LI' ? 'li' : 'p', text: textOf(element) });
       continue;
     }
 
@@ -102,7 +141,7 @@ function walk(el: Element, out: BlockSeed[]): void {
 
 function containsBlock(el: Element): boolean {
   for (const child of Array.from(el.children)) {
-    if (isBlockTag(child.tagName)) return true;
+    if (isBlockTag(tagOf(child))) return true;
     if (containsBlock(child)) return true;
   }
   return false;
@@ -110,7 +149,7 @@ function containsBlock(el: Element): boolean {
 
 function textOf(el: Element): string {
   // A line break separates words; without this the two sides glue together.
-  if (el.tagName === 'BR') return ' ';
+  if (tagOf(el) === 'BR') return ' ';
   const parts: string[] = [];
   collectText(el, parts);
   return normaliseText(parts.join(''));
@@ -129,12 +168,15 @@ function collectText(node: Node, out: string[]): void {
     }
     if (child.nodeType !== 1) continue;
     const element = child as Element;
-    if (SKIP_TAGS.has(element.tagName) || isHidden(element)) continue;
+    // Any aside stays out of a paragraph's text: a note becomes its own block,
+    // and a sidebar is dropped exactly as before.
+    if (tagOf(element) === 'ASIDE') continue;
+    if (SKIP_TAGS.has(tagOf(element)) || isHidden(element)) continue;
     if (isMarginalNote(element)) {
       out.push(' ');
       continue;
     }
-    if (element.tagName === 'BR') {
+    if (tagOf(element) === 'BR') {
       out.push(' ');
       continue;
     }
