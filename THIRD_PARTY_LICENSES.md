@@ -21,7 +21,7 @@ Columns:
 
 | Component | Version | Licence | Where | Attribution |
 |---|---|---|---|---|
-| Read IT (this project) | 0.6.0 | Apache-2.0 | bundled | — |
+| Read IT (this project) | 0.6.1 | Apache-2.0 | bundled | — |
 | `kokoro.js` (vendored, patched, `src/tts/kokoro/`) | 1.2.1 | Apache-2.0 | bundled | NOTICE + About |
 | `sherpa-onnx` (Android AAR) | 2.0.1+ | Apache-2.0 | bundled (Android) | NOTICE + About |
 | `@huggingface/transformers` | 3.8.1 | Apache-2.0 | bundled | NOTICE |

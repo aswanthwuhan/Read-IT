@@ -1,5 +1,10 @@
 # Changelog
 
+## Read IT 0.6.1 — 2026-11-21
+
+**Fixed — the first word of a line is spoken in full**
+- On the on-device Android voice, the opening of a clause could lose its first consonant, so the first word of a new line sounded rushed or incomplete. The engine no longer strips quiet starts, and only inaudible silence at each end of a clip is trimmed.
+
 ## Read IT 0.6.0 — 2026-11-21
 
 Android, Windows and the web app. This release changes how text is spoken, what EPUB and text imports keep, and how imports and backups are stored.
