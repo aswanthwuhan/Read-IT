@@ -3,6 +3,7 @@ import { db, newId } from '../core/db';
 import { isIos } from '../core/platform';
 import type { BookRecord, ColumnMode, DocFormat, ParsedDoc } from '../core/types';
 import { normaliseText } from './blocks';
+import { decodeText } from './charset';
 import { resetAudioSizeCache } from '../tts/cache';
 import { parseHtmlDocument } from './html';
 import type { LayoutMode } from './pdf';
@@ -82,7 +83,7 @@ async function parseFile(
   // never sits in memory next to a second copy of itself. TextDecoder is kept
   // for text rather than `Blob.text()` because it drops a UTF-8 BOM reliably.
   const bytes = async () => readBytes ?? file.arrayBuffer();
-  const text = async () => new TextDecoder().decode(await bytes());
+  const text = async () => decodeText(await bytes());
 
   switch (format) {
     case 'txt':
