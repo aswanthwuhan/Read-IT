@@ -39,30 +39,38 @@ export interface OrtModule {
 let loading: Promise<OrtModule> | null = null;
 
 export function loadOrt(): Promise<OrtModule> {
-  loading ??= (async () => {
-    // An absolute URL, built at runtime: a bare `/ort/ort.min.mjs` specifier is
-    // rewritten by Vite into a project import, and Vite refuses to import
-    // anything from `public/` (it is copied as-is, never transformed). A full
-    // http(s) URL is left alone, and the file is fetched as the static asset it
-    // is in both dev and the built app.
-    const href = new URL(`${ORT_BASE_URL}ort.min.mjs`, globalThis.location.origin).href;
-    const ort = (await import(/* @vite-ignore */ href)) as unknown as OrtModule;
+  if (!loading) {
+    const promise = (async () => {
+      // An absolute URL, built at runtime: a bare `/ort/ort.min.mjs` specifier is
+      // rewritten by Vite into a project import, and Vite refuses to import
+      // anything from `public/` (it is copied as-is, never transformed). A full
+      // http(s) URL is left alone, and the file is fetched as the static asset it
+      // is in both dev and the built app.
+      const href = new URL(`${ORT_BASE_URL}ort.min.mjs`, globalThis.location.origin).href;
+      const ort = (await import(/* @vite-ignore */ href)) as unknown as OrtModule;
 
-    // Neither the Android WebView nor Tauri has cross-origin isolation by
-    // default, and without `SharedArrayBuffer` the threaded build runs on one
-    // thread anyway: ask for one explicitly instead of letting the runtime warn
-    // about it on every import. A WebView that does serve the page isolated (the
-    // Android host adds the headers for the voice engines too) gets real threads,
-    // which is most of the difference between a page taking seconds and a page
-    // taking one.
-    ort.env.wasm.numThreads = globalThis.crossOriginIsolated
-      ? Math.min(4, globalThis.navigator?.hardwareConcurrency || 1)
-      : 1;
-    ort.env.wasm.proxy = false;
-    ort.env.wasm.wasmPaths = ORT_BASE_URL;
+      // Neither the Android WebView nor Tauri has cross-origin isolation by
+      // default, and without `SharedArrayBuffer` the threaded build runs on one
+      // thread anyway: ask for one explicitly instead of letting the runtime warn
+      // about it on every import. A WebView that does serve the page isolated (the
+      // Android host adds the headers for the voice engines too) gets real threads,
+      // which is most of the difference between a page taking seconds and a page
+      // taking one.
+      ort.env.wasm.numThreads = globalThis.crossOriginIsolated
+        ? Math.min(4, globalThis.navigator?.hardwareConcurrency || 1)
+        : 1;
+      ort.env.wasm.proxy = false;
+      ort.env.wasm.wasmPaths = ORT_BASE_URL;
 
-    return ort;
-  })();
+      return ort;
+    })();
+    // A transient module-load failure must not be cached forever: drop the
+    // handle on rejection so the next call inside this worker retries it.
+    loading = promise.catch((err: unknown) => {
+      loading = null;
+      throw err;
+    });
+  }
 
   return loading;
 }

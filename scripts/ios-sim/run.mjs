@@ -1367,7 +1367,7 @@ async function main() {
     if (outcome.how === 'error') throw new Error(`import failed: ${outcome.error}`);
 
     let opened = 'auto-navigated';
-    if (outcome.how === 'card') {
+    if (outcome.how === 'row') {
       const clicked = await runScript(clickByText, 'a.lib-open', TXT_TITLE);
       if (!clicked || !clicked.ok) throw new Error('book card appeared but could not be clicked');
       opened = 'card-click';
@@ -1565,7 +1565,7 @@ async function main() {
     if (outcome.how === 'error') throw new Error(`import failed: ${outcome.error}`);
 
     let opened = 'auto-navigated';
-    if (outcome.how === 'card') {
+    if (outcome.how === 'row') {
       const clicked = await runScript(clickByText, 'a.lib-open', PDF_TITLE);
       if (!clicked || !clicked.ok) throw new Error('book card appeared but could not be clicked');
       opened = 'card-click';

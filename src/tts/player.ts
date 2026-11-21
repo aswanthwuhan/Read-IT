@@ -325,7 +325,16 @@ export function createPlayer(options: PlayerOptions): Player {
         // Rows written before `bookId` existed (or by an older pre-render) are
         // otherwise unreachable to `deleteBook` forever, so retag them in place.
         if (stored.bookId !== options.bookId) {
-          await putAudio({ ...stored, bookId: options.bookId });
+          // The clip is already playable, so a failed retag must not fail it.
+          try {
+            await putAudio({ ...stored, bookId: options.bookId });
+          } catch {
+            /* best effort only: the row still plays fine without the retag */
+          }
+          // A stop/seek landing during the retag already revoked every URL and
+          // bumped generation; do not remember a fresh one now or it leaks with
+          // nothing left to revoke it.
+          if (gen !== generation) throw new AbortPlayback();
         }
         return remember({ key, blob: stored.audio, durationMs: stored.durationMs });
       }
@@ -762,6 +771,7 @@ export function createPlayer(options: PlayerOptions): Player {
 
   function resume(): void {
     if (state !== 'paused') return;
+    const gen = generation;
     state = 'playing';
     if (!canSynthesize) {
       engine.resume();
@@ -772,7 +782,11 @@ export function createPlayer(options: PlayerOptions): Player {
       const played = startPlay(audio);
       if (played) {
         played.catch((err: unknown) => {
-          if (state !== 'playing') return;
+          // A seek/advance calls abort() (bumping generation), which makes this
+          // play() reject with AbortError. Only the generation that started this
+          // resume may tear down playback; a stale rejection must not kill the
+          // newer run that already set state back to 'playing'.
+          if (state !== 'playing' || gen !== generation) return;
           state = 'idle';
           abort();
           revokeAll();

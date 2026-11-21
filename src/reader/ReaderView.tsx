@@ -272,6 +272,7 @@ export default function ReaderView() {
   prefetchRef.current = prefetchAhead;
   /** Plans are pure and cheap-ish; a chapter is planned once per settings change. */
   const planCache = useRef(new Map<string, ChapterPlan>());
+  const planCacheKey = useRef('');
   /**
    * Page view: the reader turned to another page while the voice kept going.
    * The page then stays put instead of following the voice, and "Play from
@@ -286,13 +287,19 @@ export default function ReaderView() {
   const reading = index ? sentenceAt(index, cursor) : null;
   const readingId = reading?.id ?? null;
 
+  // Invalidate during render, not in an effect: the memos below call planFor()
+  // while rendering, so an effect would leave them reading stale plans for one
+  // frame after skip/pauseMs change.
+  const nextPlanCacheKey = `${String(skip)}|${String(pauseMs)}`;
+  if (planCacheKey.current !== nextPlanCacheKey) {
+    planCacheKey.current = nextPlanCacheKey;
+    planCache.current.clear();
+  }
+
   const plan = useMemo(
     () => (chapter ? planChapter(chapter, skip, pauseMs) : null),
     [chapter, skip, pauseMs]
   );
-  useEffect(() => {
-    planCache.current.clear();
-  }, [skip, pauseMs]);
 
   /** The first sentence printed on each PDF page, for page-button stepping. */
   const pages = useMemo(() => (index ? firstPosOnPages(index) : new Map<number, Pos>()), [index]);

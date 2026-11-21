@@ -87,9 +87,12 @@ export default function App() {
           getSetting<boolean>(TUTORIAL_SEEN_KEY, false),
         ]);
         if (cancelled) return;
-        if (!tutorialSeen && bookCount === 0) setTutorialOpen(true);
+        // Exactly one greeting sheet may open: "What's new" wins over the
+        // tutorial, so a fresh install with a changelog sees the former only.
+        const showWhatsNew = shouldShowWhatsNew(lastSeen, bookCount) && !!changelogSection(APP_VERSION);
+        if (!showWhatsNew && !tutorialSeen && bookCount === 0) setTutorialOpen(true);
 
-        if (!shouldShowWhatsNew(lastSeen, bookCount) || !changelogSection(APP_VERSION)) {
+        if (!showWhatsNew) {
           if (lastSeen !== APP_VERSION) await setSetting(LAST_SEEN_VERSION_KEY, APP_VERSION);
           return;
         }

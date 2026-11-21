@@ -43,8 +43,6 @@ export default function ImportLayoutSheet({ count, modelReady, onAnswer, onCance
   closeRef.current = () => {
     if (!busy) onCancel();
   };
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
 
   useEffect(() => {
     alive.current = true;

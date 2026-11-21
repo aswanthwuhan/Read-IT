@@ -93,7 +93,13 @@ export function putAudio(rec: AudioCacheRecord, maxBytes = DEFAULT_MAX_CACHE_BYT
     // A key can be rewritten (two callers rendered the same sentence at once), so
     // subtract what the row held before: one row read, never a table scan.
     const previous = audioBytes === null ? undefined : await getAudio(rec.key);
-    await db.audioCache.put(rec);
+    try {
+      await db.audioCache.put(rec);
+    } catch {
+      /* IndexedDB quota/lock errors are not a reason to stop the sentence */
+      // Nothing was stored, so the byte total must not be adjusted either.
+      return;
+    }
     if (audioBytes === null) {
       // First write of the session: one scan gives an exact total, row included.
       await loadAudioBytes();

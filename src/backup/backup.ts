@@ -45,9 +45,6 @@ const LEGACY_SCHEMA = 1;
  */
 export const PRIVATE_SETTING_PREFIX = 'private.';
 
-/** The credential itself; kept as a named constant for the export filter. */
-export const EXCLUDED_SETTING = 'private.apiKey';
-
 /** Refuse absurd archives before allocating memory for them. */
 const MAX_ZIP_BYTES = 2 * 1024 ** 3;
 /**
@@ -241,7 +238,7 @@ async function buildZip(entries: ZipEntry[]): Promise<Blob> {
 
 export async function importBackup(file: Blob, mode: ImportMode): Promise<ImportReport> {
   const tables = dataTables();
-  const files = await readZip(file, new Set(tables.map((t) => t.name)));
+  const files = await readZip(file);
   checkManifest(files);
 
   // Everything is validated and prepared before the write transaction opens, so
@@ -353,7 +350,7 @@ function checkManifest(files: Unzipped): void {
  * Unzip while checking every entry: unknown names, path traversal and oversized
  * entries are refused, and a refused entry is never decompressed.
  */
-async function readZip(file: Blob, knownTables: Set<string>): Promise<Unzipped> {
+async function readZip(file: Blob): Promise<Unzipped> {
   const limit = isIos() ? IOS_ZIP_BYTES : MAX_ZIP_BYTES;
   if (!(file.size <= limit)) {
     throw new Error(
@@ -375,7 +372,7 @@ async function readZip(file: Blob, knownTables: Set<string>): Promise<Unzipped> 
         filter: (info) => {
           // Directory entries carry no data and are harmless.
           if (info.name.endsWith('/')) return false;
-          const problem = entryProblem(info, knownTables);
+          const problem = entryProblem(info);
           if (problem) {
             problems.push(problem);
             return false;
@@ -398,7 +395,7 @@ async function readZip(file: Blob, knownTables: Set<string>): Promise<Unzipped> 
   return files;
 }
 
-function entryProblem(info: UnzipFileInfo, _knownTables: Set<string>): string | null {
+function entryProblem(info: UnzipFileInfo): string | null {
   const name = info.name;
   if (
     !name ||

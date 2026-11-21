@@ -170,6 +170,12 @@ class PocketEngine implements TtsEngine {
       tts.destroy();
       throw neuralError('pocket', NEURAL_STAGES.voices, err);
     }
+    if (epoch !== this.epoch) {
+      // `reset()`/a new load ran while voices.bin (52 MB) was downloading: the
+      // model must not be installed after the epoch that requested it ended.
+      tts.destroy();
+      throw new Error('Pocket TTS download was cancelled');
+    }
     this.tts = tts;
     await setModelReady('pocket', true);
     this.emitProgress(1);

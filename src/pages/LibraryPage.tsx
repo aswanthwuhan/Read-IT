@@ -16,11 +16,10 @@ import '../import/library.css';
 import InstallHint from '../components/InstallHint';
 import { LAST_BOOK_KEY, type LastBook } from '../reader/lastBook';
 import ModelStatusBanner from '../tts/ModelStatusBanner';
+import { LAST_EXPORT_SETTING } from '../backup/backup';
 
 const ACCEPT = '.pdf,.epub,.docx,.txt,.md,.html';
 
-/** Written by the backup worker after a successful export. */
-const BACKUP_KEY = 'backup.lastExportAt';
 /** Set when the reader dismisses the reminder, so it stays quiet for a week. */
 const BACKUP_DISMISS_KEY = 'backup.reminderDismissedAt';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -361,7 +360,7 @@ export default function LibraryPage() {
   // Notes live only on this phone; a week without an export is worth
   // one quiet reminder, and a dismissal buys another quiet week.
   const now = Date.now();
-  const lastExportAt = useSetting<number | undefined>(BACKUP_KEY, undefined);
+  const lastExportAt = useSetting<number | undefined>(LAST_EXPORT_SETTING, undefined);
   const backupDismissedAt = useSetting<number | undefined>(BACKUP_DISMISS_KEY, undefined);
   const backupStale = lastExportAt === undefined || now - lastExportAt > WEEK_MS;
   const backupQuiet = backupDismissedAt !== undefined && now - backupDismissedAt < WEEK_MS;

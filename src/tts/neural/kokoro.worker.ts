@@ -65,6 +65,13 @@ function post(message: KokoroResponse, transfer?: Transferable[]): void {
 let tts: KokoroTTS | null = null;
 /** Request currently being synthesised; -1 once `stop` was received. */
 let currentId = -1;
+/**
+ * Incremented on every `stop`. A queued message captures the epoch when it is
+ * enqueued; if a `stop` lands before its turn, the epoch no longer matches and
+ * the work is skipped. Without this, a prefetched `speak` queued before a stop
+ * would reset `currentId` and render in full after the reader had stopped.
+ */
+let epoch = 0;
 /** ONNX sessions are not re-entrant: init/speak run one after another. */
 let queue: Promise<void> = Promise.resolve();
 
@@ -72,17 +79,23 @@ scope.onmessage = (event) => {
   const msg = event.data;
   // `stop` must act on the running synthesis immediately, not after a queue.
   if (msg.type === 'stop') {
+    epoch++;
     currentId = -1;
     return;
   }
-  queue = queue.then(() => handle(msg));
+  // Capture the epoch now: a `stop` between enqueue and execution must cancel
+  // this message even though it waits behind the current synthesis in `queue`.
+  const capturedEpoch = epoch;
+  queue = queue.then(() => handle(msg, capturedEpoch));
 };
 
-async function handle(msg: KokoroRequest): Promise<void> {
+async function handle(msg: KokoroRequest, capturedEpoch: number): Promise<void> {
+  // A stop superseded this message while it waited in the queue.
+  if (capturedEpoch !== epoch) return;
   const id = msg.type === 'speak' ? msg.id : undefined;
   try {
     if (msg.type === 'init') await init(msg.dtype, msg.device);
-    else if (msg.type === 'speak') await speak(msg.id, msg.text, msg.voice, msg.speed);
+    else if (msg.type === 'speak') await speak(msg.id, msg.text, msg.voice, msg.speed, capturedEpoch);
     else currentId = -1; // stop: drop the result of the in-flight synthesis
   } catch (err) {
     post({ type: 'error', id, message: err instanceof Error ? err.message : String(err) });
@@ -146,7 +159,9 @@ async function load(
   });
 }
 
-async function speak(id: number, text: string, voice: string, speed: number): Promise<void> {
+async function speak(id: number, text: string, voice: string, speed: number, capturedEpoch: number): Promise<void> {
+  // Another `stop` may have landed between the handle() check and here.
+  if (capturedEpoch !== epoch) return;
   const model = tts;
   if (!model) throw new Error('Kokoro model is not loaded');
   currentId = id;

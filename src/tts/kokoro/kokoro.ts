@@ -132,6 +132,10 @@ export class KokoroTTS {
           .filter((chunk) => chunk.length > 0)
         : [text];
       splitter.push(...chunks);
+      // Without close() the async iterator waits forever for more text, so an
+      // unterminated final chunk is never yielded. The caller owns closing when
+      // a TextSplitterStream is passed in, so only close the one we create here.
+      splitter.close();
     } else {
       throw new Error("Invalid input type. Expected string or TextSplitterStream.");
     }

@@ -178,8 +178,18 @@ export async function deleteBook(bookId: string): Promise<void> {
  * the copy, since that is where the empty-handle bug was seen.
  */
 export async function ownedCopy(file: Blob & { name?: string }): Promise<Blob> {
-  if (isIos()) return file;
-  return new Blob([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' });
+  return (await ownedCopyWithBytes(file)).blob;
+}
+
+/**
+ * The one place the copy policy lives. `bytes` is returned alongside the stored
+ * Blob so the import path can hand the very same bytes to the parser instead of
+ * reading the file a second time; on iOS nothing is read or copied at all.
+ */
+async function ownedCopyWithBytes(file: Blob & { name?: string }): Promise<{ blob: Blob; bytes?: ArrayBuffer }> {
+  if (isIos()) return { blob: file };
+  const bytes = await file.arrayBuffer();
+  return { blob: new Blob([bytes], { type: file.type || 'application/octet-stream' }), bytes };
 }
 
 /**
@@ -222,15 +232,10 @@ export async function importFileDetailed(
         'Import it on a computer instead.',
     );
   }
-  // The stored copy of the book (see ownedCopy). On iOS it is the picked File
-  // and the parser reads it once; elsewhere the bytes read for the copy go
-  // straight to the parser (pdf.js transfers them; the Blob has its own copy).
-  let stored: Blob = file;
-  let bytes: ArrayBuffer | undefined;
-  if (!isIos()) {
-    bytes = await file.arrayBuffer();
-    stored = new Blob([bytes], { type: file.type || 'application/octet-stream' });
-  }
+  // The stored copy of the book and the bytes for the parser come from the one
+  // copy policy (ownedCopyWithBytes): on iOS that is the picked File untouched,
+  // elsewhere the bytes read for the copy go straight to the parser.
+  const { blob: stored, bytes } = await ownedCopyWithBytes(file);
   const { doc, warning, layout } = await parseFile(stored, file.name, onProgress, bytes, options);
   const bookId = await saveRecord(doc, stored, layout);
   return { bookId, warning };
@@ -266,14 +271,18 @@ async function readCappedText(response: Response, cap: number): Promise<string> 
   if (!reader) return await response.text();
   const decoder = new TextDecoder();
   let out = '';
+  let byteLength = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    // Cap the raw bytes, not the decoded string: a multibyte character can take
+    // fewer UTF-16 code units than the bytes that made it.
+    byteLength += value.byteLength;
     out += decoder.decode(value, { stream: true });
-    if (out.length > cap) throw tooLargePage();
+    if (byteLength > cap) throw tooLargePage();
   }
   out += decoder.decode();
-  if (out.length > cap) throw tooLargePage();
+  if (byteLength > cap) throw tooLargePage();
   return out;
 }
 
@@ -306,7 +315,7 @@ export async function importUrl(url: string): Promise<string> {
         throw new Error(`That page returned ${response.status}; paste the text instead.`);
       }
       html = String(response.data ?? '');
-      if (html.length > ARTICLE_HTML_MAX_BYTES) throw tooLargePage();
+      if (new TextEncoder().encode(html).byteLength > ARTICLE_HTML_MAX_BYTES) throw tooLargePage();
     } else {
       const response = await fetch(target.toString(), { signal: abort.signal });
       if (!response.ok) {

@@ -94,10 +94,23 @@ export async function createLayoutDetector(): Promise<PageLayoutDetector | null>
   }
 
   let gone = false;
+  let terminated = false;
+
+  /** Reject every in-flight detect and stop the worker; safe to call repeatedly. */
+  const failAll = (message: string) => {
+    failure = message;
+    gone = true;
+    for (const entry of pending.values()) entry.reject(new Error(message));
+    pending.clear();
+    if (!terminated) {
+      terminated = true;
+      worker.terminate();
+    }
+  };
 
   return {
     async detect(pixels, pageWidth, pageHeight) {
-      if (failure) throw new Error(failure);
+      if (gone || failure) throw new Error(failure ?? 'The layout detector has stopped');
 
       const id = nextId++;
       const boxes = new Promise<LayoutBox[]>((resolve, reject) => {
@@ -112,12 +125,13 @@ export async function createLayoutDetector(): Promise<PageLayoutDetector | null>
       // Android can kill a backgrounded worker without an `error` event, and the
       // reply then never comes: without a limit the import waits for ever.
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeoutMessage = 'The layout model stopped answering';
       const overdue = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          failure = 'The layout model stopped answering';
-          gone = true;
-          worker.terminate();
-          reject(new Error(failure));
+          // A dead worker strands every overlapping detect, so fail them all.
+          failAll(timeoutMessage);
+          // Reject our own racer too, so Promise.race always settles.
+          reject(new Error(timeoutMessage));
         }, DETECT_TIMEOUT_MS);
       });
       try {
@@ -130,9 +144,8 @@ export async function createLayoutDetector(): Promise<PageLayoutDetector | null>
     dispose() {
       // Called again after a timeout already stopped the worker, and from `finally`.
       if (gone) return;
-      gone = true;
       worker.postMessage({ type: 'dispose' } satisfies LayoutRequest);
-      worker.terminate();
+      failAll('Layout detector was disposed');
     },
   };
 }

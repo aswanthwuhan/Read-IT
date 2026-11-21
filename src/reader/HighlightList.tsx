@@ -35,6 +35,33 @@ export default function HighlightList({ bookId, onJump }: { bookId: string; onJu
     }
   }
 
+  async function changeColor(id: string, color: Highlight['color']) {
+    try {
+      await updateHighlight(id, { color });
+      setStatus('Colour updated.');
+    } catch {
+      setStatus('Could not update the colour.');
+    }
+  }
+
+  async function removeHighlight(id: string) {
+    try {
+      await deleteHighlight(id);
+      setStatus('Highlight deleted.');
+    } catch {
+      setStatus('Could not delete the highlight.');
+    }
+  }
+
+  async function removeBookmark(id: string) {
+    try {
+      await deleteBookmark(id);
+      setStatus('Bookmark deleted.');
+    } catch {
+      setStatus('Could not delete the bookmark.');
+    }
+  }
+
   return (
     <section className="highlights" aria-label="Highlights and bookmarks">
       <div className="hl-section">
@@ -111,7 +138,7 @@ export default function HighlightList({ bookId, onJump }: { bookId: string; onJu
                     <select
                       className="input hl-select"
                       value={highlight.color}
-                      onChange={(event) => void updateHighlight(highlight.id, { color: event.target.value as Highlight['color'] })}
+                      onChange={(event) => void changeColor(highlight.id, event.target.value as Highlight['color'])}
                     >
                       {COLORS.map((color) => (
                         <option key={color} value={color}>
@@ -126,7 +153,7 @@ export default function HighlightList({ bookId, onJump }: { bookId: string; onJu
                     aria-label="Delete highlight"
                     onClick={() => {
                       if (!window.confirm('Delete this highlight?')) return;
-                      void deleteHighlight(highlight.id);
+                      void removeHighlight(highlight.id);
                     }}
                   >
                     <TrashIcon />
@@ -155,7 +182,7 @@ export default function HighlightList({ bookId, onJump }: { bookId: string; onJu
                   type="button"
                   className="btn btn-icon btn-ghost hl-delete"
                   aria-label="Delete bookmark"
-                  onClick={() => void deleteBookmark(bookmark.id)}
+                  onClick={() => void removeBookmark(bookmark.id)}
                 >
                   <TrashIcon />
                 </button>

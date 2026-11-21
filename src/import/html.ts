@@ -109,6 +109,8 @@ function containsBlock(el: Element): boolean {
 }
 
 function textOf(el: Element): string {
+  // A line break separates words; without this the two sides glue together.
+  if (el.tagName === 'BR') return ' ';
   const parts: string[] = [];
   collectText(el, parts);
   return normaliseText(parts.join(''));
@@ -129,6 +131,10 @@ function collectText(node: Node, out: string[]): void {
     const element = child as Element;
     if (SKIP_TAGS.has(element.tagName) || isHidden(element)) continue;
     if (isMarginalNote(element)) {
+      out.push(' ');
+      continue;
+    }
+    if (element.tagName === 'BR') {
       out.push(' ');
       continue;
     }

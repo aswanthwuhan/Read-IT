@@ -9,6 +9,8 @@
 
 /** An imported EPUB: the zip file as stored. */
 export const EPUB_IMPORT_MAX_BYTES = 100 * 1024 * 1024;
+/** An imported DOCX: the zip file as stored. */
+export const DOCX_IMPORT_MAX_BYTES = 100 * 1024 * 1024;
 /**
  * Total text across an EPUB's spine files, counted while parsing. A compressed
  * entry can expand to far more than its byte size, so the input cap alone
