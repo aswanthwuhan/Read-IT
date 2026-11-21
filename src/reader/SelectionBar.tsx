@@ -43,7 +43,12 @@ export default function SelectionBar({
   // Keyboard and screen-reader users land in the toolbar, not back at the top
   // of the document.
   useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
     box.current?.focus();
+    // Return focus where the selection started when the toolbar closes.
+    return () => {
+      opener?.focus?.();
+    };
   }, []);
 
   return (
@@ -55,10 +60,28 @@ export default function SelectionBar({
       aria-label={`Actions for ${count} selected sentence${count === 1 ? '' : 's'}`}
       tabIndex={-1}
       onKeyDown={(event) => {
-        if (event.key !== 'Escape') return;
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+          return;
+        }
+        if (event.key !== 'Tab') return;
+        // aria-modal content must contain Tab, including when the container
+        // itself (tabIndex=-1) started with focus.
+        const focusable = [...(box.current?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [])];
+        if (focusable.length === 0) return;
+        const first = focusable[0]!;
+        const last = focusable[focusable.length - 1]!;
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === box.current)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }}
     >
       <div className="rd-select-head">

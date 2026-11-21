@@ -21,7 +21,7 @@ Columns:
 
 | Component | Version | Licence | Where | Attribution |
 |---|---|---|---|---|
-| Read IT (this project) | 0.1.0 | Apache-2.0 | bundled | — |
+| Read IT (this project) | 0.6.0 | Apache-2.0 | bundled | — |
 | `kokoro.js` (vendored, patched, `src/tts/kokoro/`) | 1.2.1 | Apache-2.0 | bundled | NOTICE + About |
 | `sherpa-onnx` (Android AAR) | 2.0.1+ | Apache-2.0 | bundled (Android) | NOTICE + About |
 | `@huggingface/transformers` | 3.8.1 | Apache-2.0 | bundled | NOTICE |
@@ -112,6 +112,7 @@ Columns:
 | `argparse` | 1.0.10 | MIT |
 | `base64-js` | 1.5.1 | MIT |
 | `boolean` | 3.2.0 | MIT |
+| `chardet` | 2.2.0 | MIT |
 | `compromise` | 14.19.0 | MIT |
 | `cookie` | 1.1.1 | MIT |
 | `core-js` | 3.51.0 | MIT |
@@ -168,9 +169,11 @@ Columns:
 
 | Component | Licence | Where | Attribution |
 |---|---|---|---|
-| Literata (web font, Latin subset) | SIL OFL 1.1 | bundled | `public/OFL.txt` + About |
-| CMU Pronouncing Dictionary | free for any use | bundled (as the G2P tables) | About |
-| NRL Report 7948 letter-to-sound rules | public domain | bundled (as the G2P rules) | About |
+| Literata (web font, Latin subset) | SIL OFL 1.1 | bundled | `public/fonts/OFL.txt` + About |
+| CMU Pronouncing Dictionary (merged with misaki data) | free for any use / Apache-2.0 | bundled as `public/lexicon/lexicon-en-us.txt` | NOTICE |
+| Misaki English gold dictionary (`us_gold.json`) | Apache-2.0 | bundled in `public/lexicon/` | NOTICE + `src/tts/kokoro/g2p/assets/LICENSE.txt` |
+| OpenReader English letter-to-sound rules (`en-us.tsv`) | MIT | bundled in `public/lexicon/` | NOTICE + `src/tts/kokoro/g2p/assets/LICENSE.txt` |
+| NRL Report 7948 letter-to-sound rules | public domain | first-party fallback speller in `src/tts/kokoro/g2p/index.ts` | About |
 
 ## Downloaded at runtime (not part of the distributed binary)
 

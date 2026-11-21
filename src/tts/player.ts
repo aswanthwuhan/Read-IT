@@ -105,12 +105,13 @@ interface Clip {
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Kokoro native words a cancelled job "… was cancelled", and shares one cancel
- * epoch between playback and pre-render, so a cancel can belong to the other
- * caller. A cancel we did not ask for is worth one retry.
+ * All three engines share one cancel epoch between playback and pre-render, so
+ * a cancel can belong to the other caller. A cancel we did not ask for is worth
+ * one retry. Native says "… was cancelled"; web Kokoro and Pocket say "… was
+ * stopped", so both wordings must be recognised.
  */
 function isCancel(err: unknown): boolean {
-  return /cancel/i.test(err instanceof Error ? err.message : String(err));
+  return /cancel|stopped/i.test(err instanceof Error ? err.message : String(err));
 }
 
 /** Slow, steady guess at how long one sentence takes to say. */

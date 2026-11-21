@@ -131,7 +131,10 @@ export class KokoroTTS {
           .map((chunk) => chunk.trim())
           .filter((chunk) => chunk.length > 0)
         : [text];
-      splitter.push(...chunks);
+      // push() concatenates without a separator, so the matched split_pattern
+      // separators must be put back — a newline is a sentence boundary to the
+      // splitter. Pushing chunks directly would fuse "alpha" + "beta".
+      splitter.push(chunks.join('\n'));
       // Without close() the async iterator waits forever for more text, so an
       // unterminated final chunk is never yielded. The caller owns closing when
       // a TextSplitterStream is passed in, so only close the one we create here.

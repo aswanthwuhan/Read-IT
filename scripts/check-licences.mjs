@@ -28,6 +28,8 @@ const DENIED = [
   'GPLv1',
   'GPLv2',
   'GPLv3',
+  'GPL v3',
+  'GNU GPL v3',
   'GNU General Public License',
   'AGPL-1.0',
   'AGPL-3.0',
@@ -80,32 +82,69 @@ const DENIED_PACKAGES = /espeak|phonemizer|piper-phonemize|kokoro-js|ts-fsrs/i;
  *
  * @returns {{ ok: boolean, weak: boolean, why: string }}
  */
-function classify(licence) {
-  const text = licence.trim();
-  if (DENIED_MISSING.has(text)) return { ok: false, weak: false, why: 'no stated licence' };
-
-  // An "OR" means any branch may be chosen; take the best one available.
-  const alternatives = text.split(/\s+OR\s+/i);
-  const best = alternatives.map(classifyBranch).sort((a, b) => Number(b.ok) - Number(a.ok))[0];
-  if (best.ok) return best;
-
-  // Every branch is copyleft: that is the "AND" case, and it is a failure.
-  return { ok: false, weak: false, why: `${text} (every branch is copyleft)` };
+/** Remove parentheses that wrap the whole expression, so nesting is parsed. */
+function stripOuterParens(text) {
+  let value = text.trim();
+  while (value.startsWith('(') && value.endsWith(')')) {
+    let depth = 0;
+    let wraps = true;
+    for (let i = 0; i < value.length; i += 1) {
+      if (value[i] === '(') depth += 1;
+      else if (value[i] === ')') {
+        depth -= 1;
+        if (depth === 0 && i < value.length - 1) {
+          wraps = false;
+          break;
+        }
+      }
+    }
+    if (!wraps) break;
+    value = value.slice(1, -1).trim();
+  }
+  return value;
 }
 
-/** Classify a single licence, with no "OR" in it. */
-function classifyBranch(licence) {
-  const text = licence.trim();
-
-  // "AND" means every part applies, so all of them have to be acceptable.
-  if (/\s+AND\s+/i.test(text)) {
-    const parts = text.split(/\s+AND\s+/i).map((p) => classifyBranch(p));
-    if (parts.every((p) => p.ok)) {
-      const weak = parts.some((p) => p.weak);
-      return { ok: true, weak, why: weak ? `${text} (weak copyleft applies)` : text };
+/** Split on an SPDX operator that is outside any parentheses. */
+function splitTopLevel(text, operator) {
+  const parts = [];
+  const needle = ` ${operator} `;
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const character = text[i];
+    if (character === '(') depth += 1;
+    else if (character === ')') depth = Math.max(0, depth - 1);
+    else if (depth === 0 && text.slice(i, i + needle.length).toUpperCase() === needle) {
+      parts.push(text.slice(start, i));
+      i += needle.length - 1;
+      start = i + 1;
     }
-    const bad = parts.find((p) => !p.ok);
-    return { ok: false, weak: false, why: bad ? bad.why : text };
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+function classify(licence) {
+  const text = stripOuterParens(licence);
+  if (DENIED_MISSING.has(text)) return { ok: false, weak: false, why: 'no stated licence' };
+
+  // SPDX precedence: AND binds tighter than OR. A parenthesised OR inside an
+  // AND must not be allowed to satisfy the whole expression.
+  const alternatives = splitTopLevel(text, 'OR');
+  if (alternatives.length > 1) {
+    const results = alternatives.map((part) => classify(part));
+    const allowed = results.filter((result) => result.ok).sort((a, b) => Number(a.weak) - Number(b.weak))[0];
+    if (allowed) return allowed;
+    return { ok: false, weak: false, why: `${text} (every branch is copyleft)` };
+  }
+
+  const requirements = splitTopLevel(text, 'AND');
+  if (requirements.length > 1) {
+    const parts = requirements.map((part) => classify(part));
+    const bad = parts.find((part) => !part.ok);
+    if (bad) return { ok: false, weak: false, why: bad.why };
+    const weak = parts.some((part) => part.weak);
+    return { ok: true, weak, why: weak ? `${text} (weak copyleft applies)` : text };
   }
 
   const denied = DENIED.find((d) => {

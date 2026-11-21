@@ -534,7 +534,7 @@ export default function PlayerBar({
           <button
             type="button"
             className="rd-pop-action"
-            aria-label="Stop"
+            aria-label="Stop and save my place"
             onClick={() => {
               setOpen('none');
               onStop();

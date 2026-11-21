@@ -1,24 +1,22 @@
-fix(review): second-pass multi-angle audit findings
+perf(android): fast-core threads, token-budget splitting, warm G2P
 
-Six agents re-reviewed async/state, data integrity, import, TTS, UI/a11y and
-build/CI. Verified defects fixed:
+Adopted the parts of Marmalade TTS's speed design that fit sherpa-onnx:
 
-- import: strip inline markdown from body paragraphs; keep bare text in mixed
-  inline/block HTML containers; keep inequality text intact in stripInline;
-  move EPUB open/ready inside try/finally; pre-check spine entry sizes from zip
-  metadata before decompression; cap PDF gutter bin array on huge MediaBoxes
-- aligner: settle a parked waiting job when a new request starts after a
-  timeout; ignore late successes from abandoned jobs so backoff still fires
-- audio: native resume() rejects the pending play() promise on a real failure;
-  fix SHA-256 fallback padding at length 55 mod 64
-- data: write bookId into audioCache from playback AND pre-render, retag cached
-  rows on playback, reset the cache byte total after deleteBook, keep
-  ParsedDoc.warning through backup restore; correct Replace-mode wording
-- UI: keep PlayerBar mounted (hidden) so the sleep timer survives fullscreen;
-  guard corrupt tts.rate in the reader; Play disabled from the spoken-queue
-  count; Enter on the reading surface opens sentence actions; focus containment
-  for WhatsNew, selection note, layout/action sheets and reader dialogs
-- build/CI: align VITE_BASE with the live /Read-IT/ Pages path; gate the iOS
-  simulator workflow on its report; cache the G2P lexicon in the service worker;
-  widen the licence guard's denied spellings and banned packages; verify the
-  tracked native lexicon instead of rewriting it; fix NOTICE and licence rows
+- CpuClusterDetector.java: choose intra-op threads from cpufreq clusters
+  (skip the efficiency tier, drop a lone prime core when >=2 fast cores
+  remain, fallback (nProc+1)/2, clamp 1..8). KokoroPlugin's default uses it.
+- JS now treats an unset thread setting as auto (sends no count), so the
+  detector actually applies; the panel gains "Auto (fast cores)" and shows
+  the loaded session's count.
+- splitForModelByTokens: split native Kokoro sentences by real phoneme
+  tokens (480 budget under the 510 window) using ONE G2P pass per sentence
+  (wordTokenCounts), not one per clause/word; prefers clause seams.
+- warmLexicon() at native prepare so the 16 MB dictionaries parse while the
+  model loads instead of on the first sentence.
+- tokensFor() no longer falls back to letter-spelling when offline, and the
+  streamed speak() path sends the same pre-phonemised tokens.
+- Parallel TTS pass: tokenizer-vocab combining marks, hasOwn lexicon keys,
+  signed/decimal fallback numbers, tagger fixes.
+
+Gates: typecheck; 1196 tests; build; licence guard 112 deps; gradle
+assembleDebug BUILD SUCCESSFUL.

@@ -283,7 +283,11 @@ export default function SettingsPage() {
                     id="update-check"
                     type="checkbox"
                     checked={updateCheck}
-                    onChange={(event) => void setSetting(UPDATE_CHECK_KEY, event.target.checked)}
+                    onChange={(event) => {
+                      // A failed write must not become an unhandled rejection;
+                      // the controlled checkbox reverts on the next render.
+                      void setSetting(UPDATE_CHECK_KEY, event.target.checked).catch(() => undefined);
+                    }}
                   />
                   <span className="update-optin-text">
                     <span className="update-optin-label">Check for new versions when the app opens</span>

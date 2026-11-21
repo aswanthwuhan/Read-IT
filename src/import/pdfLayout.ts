@@ -5,6 +5,7 @@ import { normaliseText } from './blocks';
 // importable (and testable) without pdf.js.
 import type { ColumnMode, PanelRect } from './layout/assign';
 import { segmentText } from './segment';
+import { maxOf, minOf } from './minmax';
 
 /**
  * Pure PDF text-grouping logic: no pdfjs import, so it is unit-testable with
@@ -490,10 +491,10 @@ function makeLine(items: PdfTextItem[]): PdfLine {
   const ordered = items.slice().sort((a, b) => a.x - b.x);
   return {
     text: lineText(ordered),
-    x: Math.min(...ordered.map((item) => item.x)),
-    y: Math.min(...ordered.map((item) => item.y)),
-    w: Math.max(...ordered.map((item) => item.x + item.w)) - Math.min(...ordered.map((item) => item.x)),
-    h: Math.max(...ordered.map((item) => item.h)),
+    x: minOf(ordered.map((item) => item.x)),
+    y: minOf(ordered.map((item) => item.y)),
+    w: maxOf(ordered.map((item) => item.x + item.w)) - minOf(ordered.map((item) => item.x)),
+    h: maxOf(ordered.map((item) => item.h)),
     items: ordered,
   };
 }
@@ -529,8 +530,12 @@ export function dropPageFurniture(pages: PdfPage[]): PdfPage[] {
     }
   }
 
+  // On a single-page document every furniture-zone line occurs once, so the
+  // "repeated on most pages" rule would delete genuine titles and footers.
   const repeated = new Set(
-    [...counts].filter(([, count]) => count > pages.length * 0.5).map(([key]) => key),
+    pages.length > 1
+      ? [...counts].filter(([, count]) => count > pages.length * 0.5).map(([key]) => key)
+      : [],
   );
 
   return pages.map((page) => ({
@@ -868,10 +873,10 @@ export function rectsForRange(paragraph: PdfParagraph, start: number, end: numbe
     .map((span) => clipItem(paragraph.text, span, start, end));
 
   return groupItemsByRow(items).map((group) => {
-    const left = Math.min(...group.map((item) => item.x));
-    const top = Math.min(...group.map((item) => item.y));
-    const right = Math.max(...group.map((item) => item.x + item.w));
-    const bottom = Math.max(...group.map((item) => item.y + item.h));
+    const left = minOf(group.map((item) => item.x));
+    const top = minOf(group.map((item) => item.y));
+    const right = maxOf(group.map((item) => item.x + item.w));
+    const bottom = maxOf(group.map((item) => item.y + item.h));
     return { page: group[0].page ?? paragraph.page, x: left, y: top, w: right - left, h: bottom - top };
   });
 }
@@ -884,13 +889,16 @@ export function chaptersFromPages(
 ): Chapter[] {
   const ranges = starts.length ? withFrontMatter(starts) : defaultStarts(totalPages);
   const chapters: Chapter[] = [];
+  // A range with no readable text produces no chapter; using the pushed count
+  // as the id would then reuse it for the next range and duplicate ch-<n>.
+  let nextId = 0;
 
   for (let index = 0; index < ranges.length; index++) {
     const from = ranges[index].page;
     const to = index + 1 < ranges.length ? ranges[index + 1].page : Infinity;
     const seeds = paragraphs.filter((paragraph) => paragraph.page >= from && paragraph.page < to);
 
-    const chapter = buildChapter(ranges[index].title, chapters.length, seeds);
+    const chapter = buildChapter(ranges[index].title, nextId++, seeds);
     if (chapter) chapters.push(chapter);
   }
 
@@ -985,8 +993,8 @@ function captionFollows(number: PdfParagraph, text: PdfParagraph): boolean {
   const below = groupItemsByRow(text.spans.map((span) => span.item));
   if (!above.length || !below.length) return false;
 
-  const bottom = Math.max(...above[above.length - 1].map((item) => item.y + item.h));
-  const top = Math.min(...below[0].map((item) => item.y));
+  const bottom = maxOf(above[above.length - 1].map((item) => item.y + item.h));
+  const top = minOf(below[0].map((item) => item.y));
   return top >= bottom - 2 && top - bottom <= 30;
 }
 
@@ -1006,8 +1014,8 @@ function heuristicKind(paragraph: PdfParagraph, page: PdfPage | undefined): Bloc
   const last = rows[rows.length - 1];
   // The same band furniture is measured in, so a page number the repeat test did
   // not catch is still not read out as prose.
-  if (Math.max(...top.map((item) => item.y + item.h)) <= page.height * 0.08) return 'header';
-  if (Math.min(...last.map((item) => item.y)) >= page.height * 0.92) return 'footer';
+  if (maxOf(top.map((item) => item.y + item.h)) <= page.height * 0.08) return 'header';
+  if (minOf(last.map((item) => item.y)) >= page.height * 0.92) return 'footer';
   return null;
 }
 

@@ -171,7 +171,10 @@ export default function AlignModelPanel() {
   // The disk check is the truth; the setting only covers the moment before it
   // answers, so the warning does not flash off and on in Settings.
   const alignerOnPhone = state.kind === 'ready' || (state.kind === 'loading' && whisperReady === true);
-  const heatWarning = alignerOnPhone && isNeuralVoice(engine) && wordHighlight;
+  // On iPhone the aligner needs a separate opt-in; without it no second model
+  // runs, so warning about heat would be false.
+  const iosOptOut = isIos() && !wordTimingOn;
+  const heatWarning = alignerOnPhone && isNeuralVoice(engine) && wordHighlight && !iosOptOut;
 
   return (
     <section className={styles.block} aria-labelledby="align-whisper-title">

@@ -3,6 +3,7 @@ import { OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { PanelRect } from './layout/assign';
 import type { PdfTextItem } from './pdfLayout';
+import { maxOf, minOf } from './minmax';
 
 /**
  * Boxed panels: the shaded sidebars a textbook puts across both columns
@@ -183,15 +184,15 @@ function paintedRects(
     const corners = [apply(ctm, minX, minY), apply(ctm, minX, maxY), apply(ctm, maxX, minY), apply(ctm, maxX, maxY)];
     const xs = corners.map((point) => point[0]);
     const ys = corners.map((point) => point[1]);
-    const left = Math.min(...xs);
-    const top = Math.min(...ys);
+    const left = minOf(xs);
+    const top = minOf(ys);
     // A stroke paints half its width on either side of the path.
     const pad = strokes.has(paint) ? lineWidth / 2 : 0;
     const rect: PanelRect = {
       x: left - pad,
       y: top - pad,
-      w: Math.max(...xs) - left + 2 * pad,
-      h: Math.max(...ys) - top + 2 * pad,
+      w: maxOf(xs) - left + 2 * pad,
+      h: maxOf(ys) - top + 2 * pad,
     };
 
     // Filter before merging: the page frame is a huge stroked rectangle that

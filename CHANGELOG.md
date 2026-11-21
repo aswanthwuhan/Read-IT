@@ -1,5 +1,30 @@
 # Changelog
 
+## Read IT 0.6.0 — 2026-11-21
+
+Android, Windows and the web app. This release changes how text is spoken, what EPUB and text imports keep, and how imports and backups are stored.
+
+**New — speech reads text the way a person would**
+- Numbers, dates, units, currency, abbreviations, roman numerals and phone numbers are spoken the way a person would say them, rather than spelled out letter by letter or digit by digit. The word highlight still follows the printed sentence.
+
+**New — books keep their footnotes**
+- EPUB 3 note asides are no longer dropped during import, so footnotes stay in the book and are read in place with the rest of the text.
+
+**Improved — importing text files**
+- Plain-text and Markdown imports now detect the file's encoding instead of assuming UTF-8. Files saved in cp1251, Shift-JIS and other legacy encodings come through as readable text.
+
+**Improved — safer imports and storage**
+- Zip-based books are checked for too many entries, too much uncompressed data and unsafe file paths before they are opened. A small archive can no longer expand into something that exhausts the device.
+- Parsed documents are stored compressed in a separate store instead of inside the book rows, so the rows stay small and the library takes less space. Backups are written in format 3 to carry that store, and the app still reads format 1 and 2 backups.
+
+**Improved — chapter names come from the book**
+- EPUB chapter titles are now read from the book's own navigation document or NCX, so the contents list shows the publisher's titles instead of guessing from headings.
+
+**Fixed**
+- Code listings are no longer read aloud by default; a new Code switch in Read aloud options lets you turn them back on.
+- The Android share provider now grants access only to the camera-capture and cache directories instead of all of shared storage.
+- The Android WebView no longer allows file, content or universal file access, automatic window opening, form saving or mixed content.
+
 ## Read IT 0.5.0 — 2026-11-15
 
 The first Read IT release: a general-purpose offline ebook reader for books you already

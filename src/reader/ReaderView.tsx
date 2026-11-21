@@ -290,7 +290,8 @@ export default function ReaderView() {
   // Invalidate during render, not in an effect: the memos below call planFor()
   // while rendering, so an effect would leave them reading stale plans for one
   // frame after skip/pauseMs change.
-  const nextPlanCacheKey = `${String(skip)}|${String(pauseMs)}`;
+  // `skip` is an object, so String(skip) would always be "[object Object]".
+  const nextPlanCacheKey = `${JSON.stringify(skip)}|${String(pauseMs)}`;
   if (planCacheKey.current !== nextPlanCacheKey) {
     planCacheKey.current = nextPlanCacheKey;
     planCache.current.clear();
@@ -1144,7 +1145,9 @@ export default function ReaderView() {
       if (pos) break;
     }
     if (!pos) return;
-    window.scrollTo?.({ top: Math.max(0, goal - 96), behavior: 'smooth' });
+    const reduced = typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo?.({ top: Math.max(0, goal - 96), behavior: reduced ? 'auto' : 'smooth' });
     goToPos(pos);
   }
 
@@ -1425,7 +1428,9 @@ export default function ReaderView() {
     const delta = rect.bottom > limit ? rect.bottom - limit : rect.top < 96 ? rect.top - 96 : 0;
     if (delta !== 0) {
       try {
-        window.scrollBy({ top: delta, behavior: 'smooth' });
+        const reduced = typeof window.matchMedia === 'function'
+          && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        window.scrollBy({ top: delta, behavior: reduced ? 'auto' : 'smooth' });
       } catch {
         window.scrollTo(0, window.scrollY + delta);
       }
@@ -1619,6 +1624,7 @@ export default function ReaderView() {
   useEffect(() => {
     const open = drawer !== 'none' || typeOpen;
     if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
     sheetBody.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -1638,7 +1644,9 @@ export default function ReaderView() {
       if (!body.contains(document.activeElement)) {
         event.preventDefault();
         first.focus();
-      } else if (event.shiftKey && document.activeElement === first) {
+      } else if (event.shiftKey && (document.activeElement === first || document.activeElement === body)) {
+        // Initial focus is the sheet body itself (tabIndex=-1), so a Shift+Tab
+        // straight after opening must wrap to the last control too.
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -1647,7 +1655,11 @@ export default function ReaderView() {
       }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      // Closing a sheet returns the reader to the control that opened it.
+      opener?.focus?.();
+    };
   }, [drawer, typeOpen]);
 
   // -- unmount / app hidden ------------------------------------------------

@@ -907,7 +907,7 @@ describe('sentence announcement', () => {
     player.stop();
   });
 
-  it('plays the tapped sentence next, never the one it replaced', async () => {
+  it('plays the tapped sentence next, never the one it replaced', { timeout: 15_000 }, async () => {
     const { engine, gates } = gatedEngine();
     const announced: string[] = [];
     const player = createPlayer({ ...baseOptions, engine, voiceId: 'tap-1', onSentence: (id) => announced.push(id) });
@@ -930,7 +930,7 @@ describe('sentence announcement', () => {
     expect(el.src).not.toBe(firstUrl);
     // The look-ahead prefetch runs on a promise chain; under a loaded test
     // runner it can land a few ticks later than the announced sentence.
-    await until(() => engine.synthTexts.some((text) => text.startsWith('Beta')), 5000);
+    await until(() => engine.synthTexts.some((text) => text.startsWith('Beta')), 10_000);
     player.stop();
   });
 

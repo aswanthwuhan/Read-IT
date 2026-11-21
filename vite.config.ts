@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -7,6 +10,31 @@ import packageJson from './package.json' with { type: 'json' };
 // The build workflow sets VITE_BASE=/Read-IT/ at build time.
 const rawBase = process.env.VITE_BASE ?? '/';
 const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+
+/**
+ * Runtime-cached assets (ORT and the G2P dictionaries) keep stable URLs, so
+ * CacheFirst would serve old bytes forever. Include a short content hash in
+ * the cache name: a changed asset gets a fresh cache and a fresh download.
+ */
+function assetVersion(paths: string[]): string {
+  const hash = createHash('sha256');
+  for (const path of paths) {
+    const file = fileURLToPath(new URL(path, import.meta.url));
+    hash.update(existsSync(file) ? readFileSync(file) : path);
+  }
+  return hash.digest('hex').slice(0, 10);
+}
+
+const ortVersion = assetVersion([
+  'public/ort/ort.min.mjs',
+  'public/ort/ort-wasm-simd-threaded.jsep.mjs',
+  'public/ort/ort-wasm-simd-threaded.jsep.wasm',
+]);
+const lexiconVersion = assetVersion([
+  'public/lexicon/lexicon-en-us.txt',
+  'public/lexicon/us_gold.json',
+  'public/lexicon/en-us.tsv',
+]);
 
 export default defineConfig(({ mode }) => ({
   base,
@@ -55,14 +83,14 @@ export default defineConfig(({ mode }) => ({
             // matches <base>ort/ wherever the app is mounted
             urlPattern: ({ url }) => url.pathname.includes('/ort/'),
             handler: 'CacheFirst',
-            options: { cacheName: 'ort-runtime', expiration: { maxEntries: 10 } },
+            options: { cacheName: `ort-runtime-${ortVersion}`, expiration: { maxEntries: 10 } },
           },
           {
             // The 10.9 MB G2P lexicon is fetched at runtime; keep it for offline
             // Kokoro even though it is too large for the 5 MB precache budget.
             urlPattern: ({ url }) => url.pathname.includes('/lexicon/'),
             handler: 'CacheFirst',
-            options: { cacheName: 'g2p-lexicon', expiration: { maxEntries: 3 } },
+            options: { cacheName: `g2p-lexicon-${lexiconVersion}`, expiration: { maxEntries: 3 } },
           },
         ],
       },

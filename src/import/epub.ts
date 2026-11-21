@@ -2,8 +2,10 @@ import ePub from 'epubjs';
 import type { NavItem } from 'epubjs';
 import type { Chapter, ParsedDoc } from '../core/types';
 import { normaliseText, type BlockSeed } from './blocks';
+import { parseNavDocument, parseNcx, type OutlineEntry } from './epub/nav';
 import { blocksFromRoot, chapterFromSpine } from './html';
 import { EPUB_IMPORT_MAX_BYTES, EPUB_TEXT_MAX_BYTES } from './limits';
+import { assertEntries } from './zipLimits';
 
 /** The bits of an epubjs Section this module uses (the package has no exported type). */
 interface SpineSection {
@@ -46,11 +48,23 @@ export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promi
     await book.open(data, 'binary');
     await book.ready;
 
+    // epubjs has built its JSZip index by now, before any spine entry is
+    // decompressed. Check the whole entry list so a bomb is refused here.
+    const zipFiles = (book as unknown as { archive?: { zip?: { files?: Record<string, { _data?: { uncompressedSize?: unknown } }> } } })
+      .archive?.zip?.files;
+    if (zipFiles) {
+      assertEntries(
+        Object.entries(zipFiles).map(([name, entry]) => {
+          const size = entry?._data?.uncompressedSize;
+          return { name, size: typeof size === 'number' && Number.isFinite(size) && size >= 0 ? size : undefined };
+        }),
+      );
+    }
+
     const meta = await book.loaded.metadata;
     const title = normaliseText(meta.title) || normaliseText(fallbackTitle) || 'Untitled EPUB';
     const author = normaliseText(meta.creator) || undefined;
-    const navigation = await book.loaded.navigation.catch(() => null);
-    const tocTitles = titlesByHref(navigation?.toc ?? []);
+    const tocTitles = await navTitles(book);
 
     const sections: SpineSection[] = [];
     book.spine.each((section: SpineSection) => {
@@ -100,16 +114,19 @@ export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promi
     }
 
     const hasHeadings = spineSeeds.some((seeds) => seeds.some((seed) => seed.kind === 'h' && (seed.level ?? 0) <= 2));
+    // Ids must stay unique when a part yields no chapter (e.g. a heading-only
+    // spine file), so advance a counter on every attempt, not on pushes.
+    let nextId = 0;
     if (hasHeadings) {
       for (const part of splitAtHeadings(spineSeeds.flat(), title)) {
-        const chapter = chapterFromSpine(part.title, part.seeds, chapters.length);
+        const chapter = chapterFromSpine(part.title, part.seeds, nextId++);
         if (chapter) chapters.push(chapter);
       }
     } else {
       // No usable headings in the text: one chapter per spine file, named by the TOC.
       for (const [index, seeds] of spineSeeds.entries()) {
-        const label = spineLabels[index] || `Section ${chapters.length + 1}`;
-        const chapter = chapterFromSpine(label, seeds, chapters.length);
+        const label = spineLabels[index] || `Chapter ${nextId + 1}`;
+        const chapter = chapterFromSpine(label, seeds, nextId++);
         if (chapter) chapters.push(chapter);
       }
     }
@@ -142,10 +159,13 @@ function splitAtHeadings(seeds: BlockSeed[], label: string): { title: string; se
 
   for (const seed of seeds) {
     const heading = seed.kind === 'h' && (seed.level ?? 0) <= 2;
-    const hasBody = current.some((entry) => entry.kind !== 'h');
-    if (heading && hasBody) {
+    if (heading) {
+      // A heading is the chapter title, never a spoken body block. This also
+      // handles a heading-only run ("Chapter 1" then "Introduction") without
+      // flushing the heading into the previous chapter as text.
       flush();
       title = normaliseText(seed.text) || label;
+      continue;
     }
     current.push(seed);
   }
@@ -154,22 +174,66 @@ function splitAtHeadings(seeds: BlockSeed[], label: string): { title: string; se
   return parts.length ? parts : [{ title: label, seeds }];
 }
 
+/**
+ * Read the nav document / NCX ourselves rather than trusting epubjs's outline:
+ * 0.3 drops some real-world entries, and these labels are the only titles an
+ * unheaded spine file ever gets. The files are already in the archive epubjs
+ * opened, so `book.load` hands back their parsed DOM. epubjs's own toc stays as
+ * the safety net for nav shapes this reader does not recognise.
+ */
+async function navTitles(book: ReturnType<typeof ePub>): Promise<Map<string, string>> {
+  const packaging = book.packaging;
+  const sources: { path?: string; parse: (doc: Document) => OutlineEntry[] }[] = [
+    { path: packaging?.navPath, parse: parseNavDocument },
+    { path: packaging?.ncxPath, parse: parseNcx },
+  ];
+  const map = new Map<string, string>();
+  for (const { path, parse } of sources) {
+    if (!path) continue;
+    try {
+      // Only toc entries name spine files. Page lists and landmarks point at the
+      // same documents with labels like "5" or "Start", which would mislabel a
+      // chapter if they claimed a base name before the toc did.
+      const entries = parse((await book.load(path)) as Document).filter((entry) => entry.kind === 'toc');
+      titlesFromOutline(map, entries);
+    } catch {
+      // An unreadable nav file is not fatal: the spine can still be read, and
+      // the fallback below may recover its titles from epubjs.
+    }
+  }
+  if (map.size) return map;
+
+  const navigation = await book.loaded.navigation.catch(() => null);
+  return titlesByHref(navigation?.toc ?? []);
+}
+
+function titlesFromOutline(map: Map<string, string>, entries: OutlineEntry[]): void {
+  for (const entry of entries) {
+    addTitle(map, entry.href, entry.title);
+    if (entry.children?.length) titlesFromOutline(map, entry.children);
+  }
+}
+
 function titlesByHref(items: NavItem[]): Map<string, string> {
   const map = new Map<string, string>();
   const visit = (list: NavItem[]) => {
     for (const item of list) {
-      const href = baseHref(item.href);
-      const label = normaliseText(item.label);
-      if (href && label) {
-        if (!map.has(href)) map.set(href, label);
-        const name = basename(href);
-        if (name && !map.has(name)) map.set(name, label);
-      }
+      addTitle(map, item.href, item.label);
       if (item.subitems?.length) visit(item.subitems);
     }
   };
   visit(items);
   return map;
+}
+
+/** Index both the whole href and its base name, as spine hrefs carry OPF paths. */
+function addTitle(map: Map<string, string>, href: string, label: string): void {
+  const base = baseHref(href);
+  const text = normaliseText(label);
+  if (!base || !text) return;
+  if (!map.has(base)) map.set(base, text);
+  const name = basename(base);
+  if (name && !map.has(name)) map.set(name, text);
 }
 
 function baseHref(href: string): string {

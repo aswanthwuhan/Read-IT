@@ -1,6 +1,7 @@
 import type { PdfParagraph, PdfTextItem } from '../pdfLayout';
 import { itemsToLines, linesToParagraph, linesToParagraphs } from '../pdfLayout';
 import { type LayoutBox, regionKind } from './engine';
+import { maxOf, minOf } from '../minmax';
 
 /**
  * Turn the model's page regions back into text. Pure: no pdfjs, no ONNX, so the
@@ -170,10 +171,10 @@ function bounds(paragraph: PdfParagraph) {
   if (!paragraph.spans.length) return null;
   const items = paragraph.spans.map((span) => span.item);
   return {
-    left: Math.min(...items.map((item) => item.x)),
-    right: Math.max(...items.map((item) => item.x + item.w)),
-    top: Math.min(...items.map((item) => item.y)),
-    bottom: Math.max(...items.map((item) => item.y + item.h)),
+    left: minOf(items.map((item) => item.x)),
+    right: maxOf(items.map((item) => item.x + item.w)),
+    top: minOf(items.map((item) => item.y)),
+    bottom: maxOf(items.map((item) => item.y + item.h)),
   };
 }
 
@@ -237,7 +238,7 @@ function nearestRegion(regions: OwnedRegion[], item: PdfTextItem, pageWidth: num
 export function orderRegions<T extends LayoutBox>(boxes: T[], pageWidth: number, layout: PageLayout = {}): T[] {
   const flow = boxes.filter((box) => !FURNITURE.has(box.label));
   const extent = flow.length
-    ? Math.max(...flow.map((box) => box.x + box.w)) - Math.min(...flow.map((box) => box.x))
+    ? maxOf(flow.map((box) => box.x + box.w)) - minOf(flow.map((box) => box.x))
     : pageWidth;
   // Column edges are taken from the boxes that are plainly not spanning, so the
   // gutter is measured on the text and not on a line that straddles it.
@@ -390,8 +391,8 @@ function columnsOf(narrow: LayoutBox[], pageWidth: number, given?: { start: numb
     const own = narrow.filter((other) => Math.abs(other.x - edge) <= tolerance / 2);
     edges.push(edge);
     spans.push({
-      left: Math.min(...own.map((other) => other.x)),
-      right: Math.max(...own.map((other) => other.x + other.w)),
+      left: minOf(own.map((other) => other.x)),
+      right: maxOf(own.map((other) => other.x + other.w)),
     });
     last = edge;
   }

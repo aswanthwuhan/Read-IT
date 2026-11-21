@@ -1,5 +1,6 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { db, newId } from '../core/db';
+import { deleteContent, putContent } from '../core/contentStore';
 import { isIos } from '../core/platform';
 import type { BookRecord, ColumnMode, DocFormat, ParsedDoc } from '../core/types';
 import { normaliseText } from './blocks';
@@ -145,18 +146,28 @@ async function saveRecord(doc: ParsedDoc, fileBlob: Blob, layout?: BookRecord['l
   if (layout) record.layout = layout;
 
   await db.books.add(record);
+  // The book keeps its own parsed document for now; this compressed row is the
+  // copy a later library screen will read without cloning every book. A failed
+  // copy must not undo an import that has already saved the book: a missing row
+  // falls back to `parsed`, which stays authoritative.
+  try {
+    await putContent(record.id, JSON.stringify(doc));
+  } catch {
+    // Never report (or log) the error: it can carry the imported text.
+  }
   return record.id;
 }
 
 /** Remove a book and everything that hangs off it, in one transaction. */
 export async function deleteBook(bookId: string): Promise<void> {
   let deletedClips = 0;
-  await db.transaction('rw', [db.books, db.highlights, db.bookmarks, db.audioCache], async () => {
+  await db.transaction('rw', [db.books, db.highlights, db.bookmarks, db.audioCache, db.bookContent], async () => {
     await db.highlights.where('bookId').equals(bookId).delete();
     await db.bookmarks.where('bookId').equals(bookId).delete();
     const clips = await db.audioCache.filter((r) => r.bookId === bookId).toArray();
     deletedClips = clips.length;
     if (clips.length > 0) await db.audioCache.bulkDelete(clips.map((clip) => clip.key));
+    await deleteContent(bookId);
     await db.books.delete(bookId);
   });
   // The cache module memoises its byte total; a delete outside it would leave
@@ -269,7 +280,12 @@ const tooLargePage = () =>
  */
 async function readCappedText(response: Response, cap: number): Promise<string> {
   const reader = response.body?.getReader?.();
-  if (!reader) return await response.text();
+  if (!reader) {
+    // A patched/polyfilled fetch may expose only text(); the cap still applies.
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > cap) throw tooLargePage();
+    return text;
+  }
   const decoder = new TextDecoder();
   let out = '';
   let byteLength = 0;
@@ -291,6 +307,22 @@ async function readCappedText(response: Response, cap: number): Promise<string> 
  * Fetch a page and keep its article text. On native builds Capacitor patches
  * `fetch` so cross-origin requests work; in a plain browser most sites refuse.
  */
+/** Loopback/private/link-local hosts: never fetch from the device's own network. */
+function isPrivateAddress(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+  if (host.includes(':') && (host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd'))) {
+    return true;
+  }
+  const parts = host.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b] = parts as [number, number, number, number];
+  return a === 0 || a === 10 || a === 127
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168);
+}
+
 export async function importUrl(url: string): Promise<string> {
   let target: URL;
   try {
@@ -300,6 +332,11 @@ export async function importUrl(url: string): Promise<string> {
   }
   if (target.protocol !== 'http:' && target.protocol !== 'https:') {
     throw new Error('Only http and https addresses can be imported.');
+  }
+  // A user-supplied URL must not become a request into the LAN or metadata
+  // service; native HTTP has no CORS wall to stop it.
+  if (isPrivateAddress(target.hostname)) {
+    throw new Error('That address is on a private network and cannot be imported.');
   }
 
   let html: string;
@@ -521,6 +558,16 @@ async function reparseBook(
       ...(saveColumns === undefined ? {} : { columns: saveColumns }),
     });
   });
+
+  // Keep the compressed copy in step with the re-read book. This is outside the
+  // transaction: deflate is async and would let Dexie's scope expire, while the
+  // book row remains the source of truth every reader uses today. A failed copy
+  // must not fail a re-analysis that has already committed the new document.
+  try {
+    await putContent(book.id, JSON.stringify(parsed.doc));
+  } catch {
+    // Never log the error: it can carry the text of the re-read book.
+  }
 
   return result;
 }

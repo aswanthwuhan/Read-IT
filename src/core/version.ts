@@ -87,7 +87,9 @@ export interface ChangelogSection {
   groups: ChangelogGroup[];
 }
 
-const SECTION_HEADING = /^##\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/;
+// Current release headings are "## Read IT 0.5.0 — date"; older ones used a
+// bare version. Accept both so the What's new sheet can find the shipped notes.
+const SECTION_HEADING = /^##\s+(?:Read IT\s+)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/;
 const GROUP_HEADING = /^\*\*([^*]+)\*\*\s*:?\s*$/;
 const BULLET = /^[-*]\s+(.*)$/;
 

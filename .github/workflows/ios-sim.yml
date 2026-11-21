@@ -28,7 +28,7 @@ on:
       url:
         description: Page to open in the simulator (ignored when build is true)
         required: false
-        default: https://aswanthwuhan.github.io/readit/
+        default: https://aswanthwuhan.github.io/Read-IT/
       driver:
         description: Automation driver
         required: false
@@ -63,7 +63,7 @@ env:
   IOS_SIM_BUILD: ${{ github.event_name != 'workflow_dispatch' || inputs.build == 'true' }}
   # localhost, not 127.0.0.1: the simulator shares the Mac's loopback and WebKit
   # treats localhost as a secure context, which the service worker needs.
-  IOS_SIM_URL: ${{ (github.event_name != 'workflow_dispatch' || inputs.build == 'true') && 'http://localhost:4173/readit/' || inputs.url || 'https://aswanthwuhan.github.io/readit/' }}
+  IOS_SIM_URL: ${{ (github.event_name != 'workflow_dispatch' || inputs.build == 'true') && 'http://localhost:4173/readit/' || inputs.url || 'https://aswanthwuhan.github.io/Read-IT/' }}
   IOS_SIM_ARTIFACTS: ios-sim-artifacts
   # run.mjs stops itself and writes its report before the step's own timeout bites.
   IOS_SIM_BUDGET_MS: '1800000'

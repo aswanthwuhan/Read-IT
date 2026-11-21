@@ -15,7 +15,7 @@ import { Capacitor } from '@capacitor/core';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router-dom';
 import { getSetting, setSetting, useSetting } from '../core/settings';
-import type { TtsEngine, TtsVoice } from '../core/types';
+import type { TtsEngine } from '../core/types';
 import VoicePrompt from '../reader/VoicePrompt';
 import { useDownload } from './downloads';
 import {
@@ -256,9 +256,9 @@ export default function ModelStatusBanner({ context }: ModelStatusBannerProps) {
           Promise.all([hasMeasurement(pocket), hasMeasurement(kokoro)]),
           describeEngine().catch(() => null),
           needsVoices && isNativeAndroid()
-            ? (systemEngineOf()
-                ?.listVoices()
-                .catch(() => [] as TtsVoice[]) ?? Promise.resolve([] as TtsVoice[]))
+            // A failed probe is unknown, not "zero voices": map it to null so a
+            // transient TTS init failure cannot claim no engine is installed.
+            ? (systemEngineOf()?.listVoices().catch(() => null) ?? Promise.resolve(null))
             : Promise.resolve(null),
         ]);
         if (!alive) return;

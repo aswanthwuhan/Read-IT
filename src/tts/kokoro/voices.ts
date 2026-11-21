@@ -477,6 +477,11 @@ async function getVoiceFile(id) {
 
   // No cache, or cache failed to open. Fetch the file.
   const response = await fetch(url);
+  // A rate-limit/5xx/404 body must not be cached as float32 voice data: the
+  // garbage would be reused for the session and persisted in Cache Storage.
+  if (!response.ok) {
+    throw new Error(`Could not download the voice (HTTP ${response.status}).`);
+  }
   const buffer = await response.arrayBuffer();
 
   if (cache) {

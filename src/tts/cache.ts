@@ -97,7 +97,14 @@ export function putAudio(rec: AudioCacheRecord, maxBytes = DEFAULT_MAX_CACHE_BYT
       await db.audioCache.put(rec);
     } catch {
       /* IndexedDB quota/lock errors are not a reason to stop the sentence */
-      // Nothing was stored, so the byte total must not be adjusted either.
+      // Nothing was stored, so the byte total must not be adjusted here. But a
+      // quota failure is exactly when evicting old clips is needed — without
+      // this the cache stays over budget and never recovers during the session.
+      try {
+        await pruneAudioNow(maxBytes);
+      } catch {
+        /* best effort: playback still uses the in-memory blob */
+      }
       return;
     }
     if (audioBytes === null) {

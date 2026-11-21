@@ -13,9 +13,16 @@ import {
   UPDATE_CHECKED_AT_KEY,
   UPDATE_DISMISSED_KEY,
 } from './updateCheck';
-import { APP_VERSION } from './version';
+import { APP_VERSION, parseSemver } from './version';
 
 const NOW = 1_700_000_000_000;
+
+/** A release strictly newer than the running one, so version bumps cannot stale a test. */
+function newerThanApp(): string {
+  const parsed = parseSemver(APP_VERSION);
+  if (!parsed) throw new Error(`APP_VERSION is not semver: ${APP_VERSION}`);
+  return `${parsed.major}.${parsed.minor}.${parsed.patch + 1}`;
+}
 
 function release(tag: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -158,9 +165,11 @@ describe('checkForUpdate', () => {
     expect(await checkForUpdate({ now: NOW })).toBeNull();
     expect(await getSetting(UPDATE_DISMISSED_KEY, undefined)).toBe('9.9.9');
 
-    // A later release is offered again.
-    fetchMock.mockResolvedValueOnce(okResponse([release('v0.5.0')]));
-    expect((await checkForUpdate({ now: NOW + UPDATE_CHECK_INTERVAL_MS }))?.version).toBe('0.5.0');
+    // A genuinely newer release is offered again, even though a different one
+    // was dismissed. Derive it from APP_VERSION so it survives version bumps.
+    const newer = newerThanApp();
+    fetchMock.mockResolvedValueOnce(okResponse([release(`v${newer}`)]));
+    expect((await checkForUpdate({ now: NOW + UPDATE_CHECK_INTERVAL_MS }))?.version).toBe(newer);
   });
 
   it('stays silent on an HTTP failure and does not ask again that day', async () => {

@@ -142,7 +142,9 @@ export default function ReflowView({
     const top = 72;
     const bottom = window.innerHeight - 200;
     if (box.top < top || box.bottom > bottom) {
-      element.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      const reduced = typeof window.matchMedia === 'function'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      element.scrollIntoView?.({ behavior: reduced ? 'auto' : 'smooth', block: 'center' });
     }
     // onSentence fires often with the same id; the window check is cheap.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -55,10 +55,11 @@ CMU Pronouncing Dictionary
 Misaki (English G2P)
   Copyright (c) 2024-2026 hexgrad and contributors
   https://github.com/hexgrad/misaki
-  Licensed Apache-2.0. The English G2P port in src/tts/kokoro/g2p/misaki/ and
-  the tables in public/lexicon/us_gold.json and public/lexicon/en-us.tsv come
-  from OpenReader (MIT), which ports hexgrad/misaki; see
-  src/tts/kokoro/g2p/assets/LICENSE.txt and PROVENANCE.md.
+  Licensed Apache-2.0. The English G2P port in src/tts/kokoro/g2p/misaki/ comes
+  from OpenReader (MIT), which ports hexgrad/misaki. The gold/silver dictionary
+  in public/lexicon/us_gold.json is downloaded unmodified from upstream Misaki
+  (Apache-2.0); the letter-to-sound table public/lexicon/en-us.tsv comes from
+  OpenReader (MIT). See src/tts/kokoro/g2p/assets/LICENSE.txt and PROVENANCE.md.
 
 compromise
   Copyright (c) 2026 Spencer Kelly and contributors

@@ -165,6 +165,7 @@ function BookActionsSheet({
   const descId = useId();
   const columnsId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
   const columnsRef = useRef<HTMLSelectElement>(null);
   // The stored choice, mirrored here so the control follows the pick while the
@@ -193,18 +194,20 @@ function BookActionsSheet({
       }
       // Tab and Shift+Tab wrap inside the sheet instead of walking into the page
       // behind it; the column control, when the book is a PDF, is the first stop.
-      if (event.key !== 'Tab') return;
-      const first = columnsRef.current ?? cancelRef.current;
-      const last = deleteRef.current;
-      if (!first || !last) return;
-      // Re-reading disables both controls and drops focus to <body>; without
-      // this, Tab moves into the Library while the modal is still open.
-      if (document.activeElement === document.body) {
+      if (event.key !== 'Tab' || !sheetRef.current) return;
+      // Compute the stops on every Tab: while the book is re-read the select
+      // and Delete are disabled, so a fixed first/last pair would point at
+      // controls that cannot take focus.
+      const focusable = [...sheetRef.current.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), select:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+      )];
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (!sheetRef.current.contains(document.activeElement)) {
         event.preventDefault();
-        last.focus();
-        return;
-      }
-      if (event.shiftKey && document.activeElement === first) {
+        first.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -248,7 +251,7 @@ function BookActionsSheet({
   return (
     <>
       <div className="sheet-backdrop" onClick={close} />
-      <div className="sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId}>
+      <div ref={sheetRef} className="sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId}>
         <h2 id={titleId} className="sheet-title lib-sheet-title">
           {book.title}
         </h2>
@@ -296,7 +299,15 @@ function BookActionsSheet({
           <button ref={cancelRef} type="button" className="btn btn-secondary" onClick={close} disabled={columnsBusy}>
             Cancel
           </button>
-          <button ref={deleteRef} type="button" className="btn btn-danger" onClick={onDelete}>
+          <button
+            ref={deleteRef}
+            type="button"
+            className="btn btn-danger"
+            onClick={() => {
+              if (!columnsBusy) onDelete();
+            }}
+            disabled={columnsBusy}
+          >
             Delete book
           </button>
         </div>

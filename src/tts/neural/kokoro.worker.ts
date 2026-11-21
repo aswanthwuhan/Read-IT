@@ -5,6 +5,7 @@
  * the browser has it, WASM otherwise.
  */
 import { env as transformersEnv } from '@huggingface/transformers';
+import { warmLexicon } from '../kokoro/g2p/index.js';
 import { KokoroTTS } from '../kokoro/kokoro.js';
 import type { KokoroDevice, KokoroDtype, KokoroRequest, KokoroResponse } from './kokoroProtocol';
 import { patchCachedKokoroModel } from './kokoroPhasePatch';
@@ -94,9 +95,9 @@ async function handle(msg: KokoroRequest, capturedEpoch: number): Promise<void> 
   if (capturedEpoch !== epoch) return;
   const id = msg.type === 'speak' ? msg.id : undefined;
   try {
+    // `stop` is handled synchronously in onmessage and never reaches this queue.
     if (msg.type === 'init') await init(msg.dtype, msg.device);
     else if (msg.type === 'speak') await speak(msg.id, msg.text, msg.voice, msg.speed, capturedEpoch);
-    else currentId = -1; // stop: drop the result of the in-flight synthesis
   } catch (err) {
     post({ type: 'error', id, message: err instanceof Error ? err.message : String(err) });
   }
@@ -107,6 +108,9 @@ async function init(dtype: KokoroDtype, device: KokoroDevice): Promise<void> {
     post({ type: 'ready', voices: Object.keys(tts.voices) });
     return;
   }
+  // Start the ~16 MB G2P dictionary fetch alongside the model download so the
+  // first sentence does not pay for both in sequence.
+  warmLexicon();
   const report = createProgressAggregator(
     (fraction) => post({ type: 'progress', fraction }),
     // The tokenizer lands first; without a known total the bar would read 99%

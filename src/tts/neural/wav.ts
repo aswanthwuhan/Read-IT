@@ -88,7 +88,8 @@ export async function wavDurationMs(blob: Blob): Promise<number> {
   while (offset + 8 <= bytes.length) {
     const id = ascii(offset);
     const size = view.getUint32(offset + 4, true);
-    if (id === 'fmt ' && offset + 16 <= bytes.length) byteRate = view.getUint32(offset + 16, true);
+    // byteRate occupies offset+16..offset+19; the guard must cover all four.
+    if (id === 'fmt ' && offset + 20 <= bytes.length) byteRate = view.getUint32(offset + 16, true);
     if (id === 'data') {
       if (!byteRate) return 0;
       return (size / byteRate) * 1000;
