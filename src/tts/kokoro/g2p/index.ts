@@ -1,34 +1,40 @@
 /**
- * Read IT G2P — the licence-clean replacement for `phonemizer`/espeak-ng in the
- * web Kokoro engine. No native dependency, no copyleft code.
+ * Read IT G2P — English phonemisation for the web Kokoro engine.
  *
- * Data sources (all permissive or public domain):
- *  - `lexicon-en-us.txt`: CMU Pronouncing Dictionary + en_list + compounds,
- *    redistributed with sherpa-onnx (Apache-2.0). 167k word -> IPA entries with
- *    primary/secondary stress. Fetched once, lazily, and cached.
- *  - NRL Report 7948 letter-to-sound rules (US Government work, public domain)
- *    as the out-of-vocabulary fallback, so a word the lexicon misses still
- *    produces pronounceable phonemes instead of silence.
- *  - `vocab.json`: the Kokoro tokenizer vocabulary. Every emitted phoneme is
- *    restricted to this set, so the model never receives an unknown token.
+ * The pipeline is the Apache-2.0 Misaki port that OpenReader (MIT) uses, see
+ * `misaki/PROVENANCE.md` and `assets/LICENSE.txt`:
+ *  - `us_gold.json`: Misaki's gold dictionary with part-of-speech variants
+ *    ("read" present vs past, "record" noun vs verb), 90k entries.
+ *  - `lexicon-en-us.txt`: Read IT's merged Misaki + sherpa-onnx dictionary
+ *    (326k entries) as the silver dictionary, so names and technical words the
+ *    gold set lacks still resolve.
+ *  - `en-us.tsv`: letter-to-sound rules induced from those dictionaries, used
+ *    for out-of-vocabulary words instead of spelling them letter by letter.
+ *  - number-to-words, plural/-ed/-ing and contraction rules, function-word
+ *    forms ("a"/"an"/"the"/"to") and diacritic folding.
  *
- * The lexicon is served from `public/lexicon/` so it is not bundled into the
- * worker; it is downloaded once and then lives in the browser cache alongside
- * the model weights. If the fetch fails (offline first run) the OOV fallback
- * still lets the reader speak.
+ * No espeak-ng, no copyleft code. If the data cannot be fetched (offline first
+ * run) a small built-in fallback still speaks numbers and spells OOV words.
  */
 import vocabRaw from './vocab.json?raw';
+import { G2P } from './misaki/g2p';
+import { LetterToSound } from './misaki/letter-to-sound';
+import { Lexicon } from './misaki/lexicon';
+import type { GoldValue } from './misaki/lexicon';
 
 const VOCAB: Set<string> = new Set(Object.keys(JSON.parse(vocabRaw).model.vocab));
-const LEXICON_URL = `${import.meta.env.BASE_URL}lexicon/lexicon-en-us.txt`;
+const BASE = import.meta.env.BASE_URL;
+const LEXICON_URL = `${BASE}lexicon/lexicon-en-us.txt`;
+const GOLD_URL = `${BASE}lexicon/us_gold.json`;
+const RULES_URL = `${BASE}lexicon/en-us.tsv`;
 
-/** Map the lexicon's phone spellings onto the Kokoro tokenizer's phone set. */
+/** Map the dictionaries' phone spellings onto the Kokoro tokenizer's phone set. */
 const PHONE_MAP: Record<string, string> = {
   r: 'ɹ', g: 'ɡ', x: 'k', 'ɬ': 'l', 'ʲ': 'j', 'ʧ': 'tʃ', 'ʤ': 'dʒ',
   'ɡ': 'ɡ', 'ɹ': 'ɹ', 'ː': 'ː', 'ˈ': 'ˈ', 'ˌ': 'ˌ',
 };
 
-/** Public-domain NRL-style letter -> phone fallback for out-of-vocabulary words. */
+/** Public-domain NRL-style letter -> phone fallback when the data is unavailable. */
 const LETTER_PHONE: Record<string, string> = {
   a: 'ə', b: 'b', c: 'k', d: 'd', e: 'ɛ', f: 'f', g: 'ɡ', h: 'h', i: 'ɪ',
   j: 'dʒ', k: 'k', l: 'l', m: 'm', n: 'n', o: 'ɑ', p: 'p', q: 'k', r: 'ɹ',
@@ -36,52 +42,42 @@ const LETTER_PHONE: Record<string, string> = {
 };
 const VOWELS = new Set(['ə', 'ɛ', 'ɪ', 'ɑ', 'ʌ', 'æ', 'ɔ', 'ʊ', 'i', 'a', 'o', 'u', 'ɜ', 'ɐ', 'ɒ']);
 
-let lexiconPromise: Promise<Map<string, string>> | null = null;
-
-function parseLexicon(text: string): Map<string, string> {
-  const map = new Map<string, string>();
+/** The merged dictionary, keyed lowercase like Misaki's own dictionaries. */
+function parseLexicon(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
   for (const line of text.split('\n')) {
     if (!line || line.startsWith('#')) continue;
     const sep = line.indexOf('||');
     if (sep < 0) continue;
     const word = line.slice(0, sep).trim();
-    // Skip multi-word entries; the single-word table has 167k entries, which
-    // covers virtually all prose, and a phrase pronunciation could not be
-    // applied to one word at a time anyway.
+    // Skip multi-word entries; a phrase pronunciation cannot be applied to one
+    // word at a time anyway.
     if (!word || /\s/.test(word)) continue;
-    const phones = line.slice(sep + 2).trim();
+    // The merged file writes one phone per field ("k ɪ lˈ ɑː ..."); Misaki's
+    // own dictionaries hold one continuous string. Strip the separators.
+    const phones = line
+      .slice(sep + 2)
+      .trim()
+      .replace(/\s+/gu, '');
     if (!phones) continue;
-    const key = word.toUpperCase();
-    if (!map.has(key)) map.set(key, phones);
+    const key = word.toLowerCase();
+    if (out[key] === undefined) out[key] = phones;
   }
-  return map;
+  return out;
 }
 
-function loadLexicon(): Promise<Map<string, string>> {
-  if (!lexiconPromise) {
-    lexiconPromise = fetch(LEXICON_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error(`lexicon HTTP ${res.status}`);
-        return res.text();
-      })
-      .then(parseLexicon)
-      .catch(() => new Map<string, string>());
-  }
-  return lexiconPromise;
-}
-
-/** Keep only phonemes in the Kokoro vocabulary; join without spaces so the
- * tokenizer sees one phoneme sequence per word (as it did with espeak). */
-function clean(phones: string): string {
-  const out: string[] = [];
-  for (const token of phones.split(/\s+/)) {
-    if (!token) continue;
-    const mapped = PHONE_MAP[token] ?? token;
-    for (const ch of mapped) {
-      if (VOCAB.has(ch)) out.push(ch);
+/** Keep only phonemes the Kokoro tokenizer knows, preserving word spaces. */
+function filterVocab(phonemes: string): string {
+  let out = '';
+  for (const ch of phonemes) {
+    if (/\s/.test(ch)) {
+      if (out && !out.endsWith(' ')) out += ' ';
+      continue;
     }
+    const mapped = PHONE_MAP[ch] ?? ch;
+    for (const phone of mapped) if (VOCAB.has(phone)) out += phone;
   }
-  return out.join('');
+  return out.trim();
 }
 
 function spell(word: string): string {
@@ -99,20 +95,116 @@ function spell(word: string): string {
   return out.join('');
 }
 
-/** Convert plain text (no punctuation — the caller strips it) to Kokoro IPA. */
-export async function phonemizeWithLexicon(text: string): Promise<string> {
-  const lexicon = await loadLexicon();
+const SMALL_NUMBERS = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+  'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+  'seventeen', 'eighteen', 'nineteen',
+];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+const SCALES = ['', 'thousand', 'million', 'billion', 'trillion'];
+
+function underThousand(n: number): string[] {
+  const out: string[] = [];
+  if (n >= 100) {
+    out.push(SMALL_NUMBERS[Math.floor(n / 100)], 'hundred');
+    n %= 100;
+  }
+  if (n >= 20) {
+    out.push(TENS[Math.floor(n / 10)]);
+    if (n % 10) out.push(SMALL_NUMBERS[n % 10]);
+  } else if (n > 0) {
+    out.push(SMALL_NUMBERS[n]);
+  }
+  return out;
+}
+
+/** Spell a digit-only token as English words when the dictionaries are absent. */
+function numberWords(token: string): string[] {
+  let value = BigInt(token);
+  if (value === 0n) return ['zero'];
+  const out: string[] = [];
+  let scale = 0;
+  while (value > 0n && scale < SCALES.length) {
+    const part = Number(value % 1000n);
+    if (part > 0) {
+      const words = underThousand(part);
+      if (scale > 0) words.push(SCALES[scale]);
+      out.unshift(...words);
+    }
+    value /= 1000n;
+    scale += 1;
+  }
+  return out;
+}
+
+/** The pre-data fallback: numbers as words, OOV spelled, no dictionary. */
+function fallbackPhonemize(text: string): string {
   const words: string[] = [];
   for (const raw of text.trim().split(/\s+/)) {
     if (!raw) continue;
-    const key = raw.toUpperCase().replace(/[^A-Z']/g, '');
-    if (!key) continue;
-    words.push(clean(lexicon.get(key) ?? spell(key)));
+    const tokens = /^\d+$/.test(raw) ? numberWords(raw) : [raw];
+    for (const token of tokens) {
+      const key = token.toLowerCase().replace(/[^a-z']/g, '');
+      if (!key) continue;
+      words.push(filterVocab(spell(key)));
+    }
   }
   return words.filter(Boolean).join(' ');
 }
 
-/** Warm the lexicon in the background so the first sentence is not delayed. */
+let g2pPromise: Promise<G2P | null> | null = null;
+
+async function loadG2P(): Promise<G2P | null> {
+  if (!g2pPromise) {
+    g2pPromise = (async () => {
+      const [silverText, goldText, rulesText] = await Promise.all([
+        fetch(LEXICON_URL).then((res) => {
+          if (!res.ok) throw new Error(`lexicon HTTP ${res.status}`);
+          return res.text();
+        }),
+        fetch(GOLD_URL).then((res) => {
+          if (!res.ok) throw new Error(`gold HTTP ${res.status}`);
+          return res.text();
+        }),
+        fetch(RULES_URL).then((res) => {
+          if (!res.ok) throw new Error(`rules HTTP ${res.status}`);
+          return res.text();
+        }),
+      ]);
+      const gold = JSON.parse(goldText) as Record<string, GoldValue>;
+      const silver = parseLexicon(silverText);
+      return new G2P({
+        lexicon: new Lexicon({
+          british: false,
+          data: { gold, silver },
+          letterToSound: new LetterToSound(rulesText),
+        }),
+        // Kokoro's own pipeline drops an unresolvable word rather than reading
+        // a marker; the letter-to-sound rules make that rare.
+        unk: '',
+      });
+    })().catch(() => {
+      // This call falls back to spelling; a later sentence retries the load.
+      g2pPromise = null;
+      return null;
+    });
+  }
+  return g2pPromise;
+}
+
+/** Convert plain text (no punctuation — the caller strips it) to Kokoro IPA. */
+export async function phonemizeWithLexicon(text: string): Promise<string> {
+  const g2p = await loadG2P();
+  if (g2p) return filterVocab(g2p.phonemize(text).phonemes);
+  return fallbackPhonemize(text);
+}
+
+/** Warm the dictionaries in the background so the first sentence is not delayed. */
 export function warmLexicon(): void {
-  void loadLexicon();
+  void loadG2P();
+}
+
+/** Test hook: drop the cached pipeline so a new fetch stub takes effect. */
+export function resetG2PForTests(): void {
+  g2pPromise = null;
 }

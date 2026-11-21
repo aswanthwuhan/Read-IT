@@ -112,12 +112,14 @@ Columns:
 | `argparse` | 1.0.10 | MIT |
 | `base64-js` | 1.5.1 | MIT |
 | `boolean` | 3.2.0 | MIT |
+| `compromise` | 14.19.0 | MIT |
 | `cookie` | 1.1.1 | MIT |
 | `core-js` | 3.51.0 | MIT |
 | `core-util-is` | 1.0.3 | MIT |
 | `define-data-property` | 1.1.4 | MIT |
 | `define-properties` | 1.2.1 | MIT |
 | `detect-node` | 2.1.0 | MIT |
+| `efrt` | 2.9.0 | MIT |
 | `es-define-property` | 1.0.1 | MIT |
 | `es-errors` | 1.3.0 | MIT |
 | `es6-error` | 4.1.1 | MIT |
@@ -154,6 +156,7 @@ Columns:
 | `set-cookie-parser` | 2.7.3 | MIT |
 | `setimmediate` | 1.0.5 | MIT |
 | `string_decoder` | 1.1.1 | MIT |
+| `suffix-thumb` | 6.0.0 | MIT |
 | `underscore` | 1.13.8 | MIT |
 | `undici-types` | 8.9.0 | MIT |
 | `util-deprecate` | 1.0.2 | MIT |

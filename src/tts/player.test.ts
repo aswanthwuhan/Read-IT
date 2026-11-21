@@ -928,7 +928,9 @@ describe('sentence announcement', () => {
     await until(() => announced.length === 2);
     expect(announced).toEqual(['s1', 's3']);
     expect(el.src).not.toBe(firstUrl);
-    expect(engine.synthTexts.some((text) => text.startsWith('Beta'))).toBe(true);
+    // The look-ahead prefetch runs on a promise chain; under a loaded test
+    // runner it can land a few ticks later than the announced sentence.
+    await until(() => engine.synthTexts.some((text) => text.startsWith('Beta')), 5000);
     player.stop();
   });
 

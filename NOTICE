@@ -52,6 +52,19 @@ CMU Pronouncing Dictionary
   Free for any use. Used to build the pronunciation tables in src/tts/kokoro/g2p/
   and public/lexicon/lexicon-en-us.txt.
 
+Misaki (English G2P)
+  Copyright (c) 2024-2026 hexgrad and contributors
+  https://github.com/hexgrad/misaki
+  Licensed Apache-2.0. The English G2P port in src/tts/kokoro/g2p/misaki/ and
+  the tables in public/lexicon/us_gold.json and public/lexicon/en-us.tsv come
+  from OpenReader (MIT), which ports hexgrad/misaki; see
+  src/tts/kokoro/g2p/assets/LICENSE.txt and PROVENANCE.md.
+
+compromise
+  Copyright (c) 2026 Spencer Kelly and contributors
+  https://github.com/spencermountain/compromise
+  Licensed MIT. Used by the Misaki port for part-of-speech tags.
+
 --------------------------------------------------------------------------------
 Content and code originating outside this repository
 --------------------------------------------------------------------------------

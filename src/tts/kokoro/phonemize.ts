@@ -166,7 +166,8 @@ const PUNCTUATION = ';:,.!?¡¿—…"«»“”(){}[]';
 const PUNCTUATION_PATTERN = new RegExp(`(\\s*[${escapeRegExp(PUNCTUATION)}]+\\s*)+`, "g");
 
 /**
- * Phonemize text using Read IT's own lexicon G2P (public-domain CMUdict/NRL data).
+ * Phonemize text with Read IT's G2P: the Apache-2.0 Misaki port used by
+ * OpenReader (lexicon + POS variants + letter-to-sound + number-to-words).
  * No external phonemiser, no native dependency, no copyleft code.
  * @param {string} text The text to phonemize
  * @param {"a"|"b"} language The language to use
