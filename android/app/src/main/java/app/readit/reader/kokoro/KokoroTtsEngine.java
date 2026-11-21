@@ -171,7 +171,13 @@ public final class KokoroTtsEngine {
         OfflineTtsConfig config = new OfflineTtsConfig();
         config.setModel(modelConfig);
         config.setMaxNumSentences(1);
-        config.setSilenceScale(0.2f);
+        // sherpa's GeneratedAudio::ScaleSilence() shortens any run with |sample| <= 0.01 that
+        // lasts > 0.2 s down to 20% of its length. Kokoro emits ~300 ms of leading silence and
+        // a soft consonant onset (f/s/h/th) stays under 0.01, so the two form one run and the
+        // onset is deleted — on every chunk, because each clause is a separate generate() call.
+        // 1f disables scaling entirely; do not lower this again (the inaudible edges are
+        // handled separately by AudioEdgeTrimmer at a much lower -60 dBFS threshold).
+        config.setSilenceScale(1f);
 
         Log.i(TAG, String.format(Locale.US,
                 "Loading Kokoro from %s with %d threads, provider %s", path, wanted, wantedProvider));
@@ -331,6 +337,12 @@ public final class KokoroTtsEngine {
         if (samples == null || samples.length == 0) {
             throw new IOException("sherpa-onnx generated an empty waveform");
         }
+
+        // Silence scaling is off (see load()), so Kokoro keeps both its ~300 ms lead-in and
+        // its trailing silence on every clause. The reader concatenates clips back-to-back
+        // and adds no pause of its own, so trim only the inaudible edges here; the -60 dBFS
+        // threshold leaves a 0.006 soft attack untouched.
+        samples = AudioEdgeTrimmer.trimSilentEdges(samples, generatedRate);
 
         byte[] wav = WavWriter.toBytes(samples, generatedRate);
 
