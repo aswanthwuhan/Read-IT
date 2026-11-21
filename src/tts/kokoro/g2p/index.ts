@@ -22,13 +22,10 @@ import { LetterToSound } from './misaki/letter-to-sound';
 import { Lexicon } from './misaki/lexicon';
 import type { GoldValue } from './misaki/lexicon';
 
-// The dictionaries use syllabic-consonant and cedilla combining marks that the
-// tokenizer vocabulary does not list on its own but accepts attached to a phone.
-const VOCAB: Set<string> = new Set([
-  ...Object.keys(JSON.parse(vocabRaw).model.vocab),
-  '\u0329',
-  '\u0327',
-]);
+// Keep exactly the tokenizer's own symbols. Combining marks such as U+0329 are
+// stripped by the model's normalizer and are not valid native tokens either, so
+// adding them would make the native token list unusable.
+const VOCAB: Set<string> = new Set(Object.keys(JSON.parse(vocabRaw).model.vocab));
 const BASE = import.meta.env.BASE_URL;
 const LEXICON_URL = `${BASE}lexicon/lexicon-en-us.txt`;
 const GOLD_URL = `${BASE}lexicon/us_gold.json`;
@@ -67,7 +64,9 @@ function parseLexicon(text: string): Record<string, string> {
       .replace(/\s+/gu, '');
     if (!phones) continue;
     const key = word.toLowerCase();
-    if (out[key] === undefined) out[key] = phones;
+    // hasOwn, not `=== undefined`: "constructor" and friends resolve to
+    // inherited Object.prototype members and would be dropped.
+    if (!Object.hasOwn(out, key)) out[key] = phones;
   }
   return out;
 }
@@ -149,12 +148,28 @@ function numberWords(token: string): string[] {
   return out;
 }
 
+/** Digits, optionally signed/grouped/decimal, as spoken words for the fallback. */
+function fallbackNumber(token: string): string[] {
+  let text = token.replaceAll(',', '');
+  const negative = text.startsWith('-') || text.startsWith('−');
+  if (negative) text = text.slice(1);
+  const [integer, fraction] = text.split('.');
+  const words: string[] = negative ? ['minus'] : [];
+  if (integer) words.push(...numberWords(integer));
+  if (fraction !== undefined) {
+    words.push('point');
+    for (const digit of fraction) words.push(SMALL_NUMBERS[Number(digit)] ?? '');
+  }
+  return words.filter(Boolean);
+}
+
 /** The pre-data fallback: numbers as words, OOV spelled, no dictionary. */
 function fallbackPhonemize(text: string): string {
   const words: string[] = [];
   for (const raw of text.trim().split(/\s+/)) {
     if (!raw) continue;
-    const tokens = /^\d+$/.test(raw) ? numberWords(raw) : [raw];
+    const numeric = /^[−-]?[\d,]+(?:\.\d+)?$/.test(raw);
+    const tokens = numeric ? fallbackNumber(raw) : [raw];
     for (const token of tokens) {
       const key = token.toLowerCase().replace(/[^a-z']/g, '');
       if (!key) continue;
@@ -219,12 +234,42 @@ export async function phonemizeWithLexicon(text: string): Promise<string> {
  * the caller can fall back to sending text.
  */
 export async function tokensFor(text: string): Promise<string[] | null> {
-  const phonemes = await phonemizeWithLexicon(text);
+  // Do not route through phonemizeWithLexicon here: its offline fallback spells
+  // words letter by letter, which is worse than letting sherpa use its own
+  // lexicon. Return null so the caller sends raw text instead.
+  const g2p = await loadG2P();
+  if (!g2p) return null;
   // Kokoro's vocabulary holds one phoneme (or punctuation mark) per token;
   // phonemizeWithLexicon only spaces words, so split by code point and drop
   // those word separators.
-  const tokens = Array.from(phonemes).filter((ch) => ch !== ' ' && VOCAB.has(ch));
+  const tokens = Array.from(filterVocab(g2p.phonemize(text).phonemes)).filter(
+    (ch) => ch !== ' ' && VOCAB.has(ch),
+  );
   return tokens.length > 0 ? tokens : null;
+}
+
+/**
+ * Kokoro token counts for each whitespace-separated word of `text`, from one
+ * phonemisation pass. Splitting by these avoids phonemising every candidate
+ * clause and every word again (the tagger is the expensive part).
+ * Null when the dictionaries are unavailable.
+ */
+export async function wordTokenCounts(text: string): Promise<number[] | null> {
+  const g2p = await loadG2P();
+  if (!g2p) return null;
+  const { tokens } = g2p.phonemize(text);
+  const counts: number[] = [];
+  let current = 0;
+  for (const token of tokens) {
+    const phones = token.phonemes ?? '';
+    for (const ch of phones) if (VOCAB.has(ch)) current += 1;
+    if (token.whitespace) {
+      counts.push(current);
+      current = 0;
+    }
+  }
+  counts.push(current);
+  return counts;
 }
 
 /** Warm the dictionaries in the background so the first sentence is not delayed. */

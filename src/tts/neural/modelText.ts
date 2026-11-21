@@ -22,8 +22,11 @@
  *
  * The native Kokoro engine and Pocket split sentences with `clauseChunk`; the
  * web engine had no splitting at all, which is why only the web build trailed
- * off at the end of long sentences.
+ * off at the end of long sentences. The native engine knows the real token
+ * counts (`splitForModelByTokens`), so it cuts on measured tokens instead of
+ * these character/digit/word proxies.
  */
+import { wordTokenCounts } from '../kokoro/g2p/index';
 import { splitIntoClauses } from './clauseChunk';
 
 /** Phoneme tokens one `generate()` call can hold; kokoro-js truncates at 510. */
@@ -99,6 +102,73 @@ export function splitForModel(text: string): string[] {
     minWords: MAX_CHUNK_WORDS / 2,
   });
   return clauses.flatMap(wrapByBudget);
+}
+
+/**
+ * Tokens one native `Kokoro.synthesize()` call is aimed at: the 510-token window
+ * minus a margin, so the clause the engine measures after the split still fits.
+ */
+export const NATIVE_TOKEN_BUDGET = 480;
+
+/** Per-word Kokoro token counts; `wordTokenCounts` in the app, a stub in tests. */
+export type WordTokenCounter = (text: string) => Promise<number[] | null>;
+
+/**
+ * Split one sentence by its real phoneme-token count, for the native engine.
+ *
+ * The web budgets above cannot see pronunciation: "11121314" is eight characters
+ * but forty tokens, and a URL is spelled letter by letter, so a character cap
+ * either truncates or over-splits. Sherpa-onnx exposes the same 510-token window,
+ * so measuring `tokensFor` is both safe and cheaper: a sentence under the budget
+ * stays one call. Only when it is over does the text split at clause seams, then
+ * between words if a single clause is still too long — never inside a word.
+ *
+ * Returns `splitForModel`'s pieces when the dictionaries are not loaded
+ * (`tokensFor` → null), so an offline first run still gets a usable split.
+ */
+export async function splitForModelByTokens(
+  text: string,
+  tokenBudget = NATIVE_TOKEN_BUDGET,
+  countWords: WordTokenCounter = wordTokenCounts
+): Promise<string[]> {
+  const normalised = text.trim().replace(/\s+/g, ' ');
+  if (normalised === '') return [];
+  const counts = await countWords(normalised);
+  // The counter is one phonemisation of the whole sentence, not one per
+  // candidate clause: the Misaki tagger is the expensive part.
+  if (!counts) return splitForModel(normalised);
+
+  const words = normalised.split(' ');
+  // A G2P tokenizer that groups words differently is not a splitter we can
+  // trust for offsets; fall back rather than cut inside a word.
+  if (counts.length !== words.length) return splitForModel(normalised);
+
+  const prefix: number[] = [0];
+  for (const count of counts) prefix.push(prefix[prefix.length - 1]! + count);
+  const total = prefix[prefix.length - 1]!;
+  // The common case: one model call, exactly as before token splitting.
+  if (total <= tokenBudget) return [normalised];
+
+  const pieces: string[] = [];
+  let start = 0;
+  while (start < words.length) {
+    // Longest run of whole words that fits the budget.
+    let end = start + 1;
+    while (end < words.length && prefix[end + 1]! - prefix[start]! <= tokenBudget) end += 1;
+    // Prefer a clause seam (the word before it keeps its punctuation) when it
+    // still fills at least half the budget; otherwise cut between words.
+    let cut = end;
+    for (let candidate = end; candidate > start + 1; candidate -= 1) {
+      if (!/[.,;:!?…—–-]$/.test(words[candidate - 1]!)) continue;
+      if (prefix[candidate]! - prefix[start]! >= tokenBudget / 2) {
+        cut = candidate;
+        break;
+      }
+    }
+    pieces.push(words.slice(start, cut).join(' '));
+    start = cut;
+  }
+  return pieces;
 }
 
 /** One generated piece and the sample rate it came back at. */

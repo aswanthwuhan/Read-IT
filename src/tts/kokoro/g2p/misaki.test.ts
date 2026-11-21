@@ -117,4 +117,18 @@ describe('Misaki G2P', () => {
       expect(spoken.toLowerCase()).toContain('m');
     }
   });
+
+  it('does not mistake an intra-word hyphen for a minus sign', async () => {
+    const covid = await phonemizeWithLexicon('COVID-19');
+    const covidOnly = await phonemizeWithLexicon('COVID');
+    expect(covid.length).toBeGreaterThan(covidOnly.length + 3);
+    const range = await phonemizeWithLexicon('1939-1945');
+    expect(range.split(' ').filter(Boolean).length).toBeGreaterThan(4);
+  });
+
+  it('voices a slash as "slash"', async () => {
+    const spoken = await phonemizeWithLexicon('1/2');
+    expect(spoken.split(' ').filter(Boolean).length).toBeGreaterThanOrEqual(3);
+    expect(spoken).toContain('ʃ');
+  });
 });

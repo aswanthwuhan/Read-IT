@@ -37,7 +37,7 @@ async function clipBase64(samples: number, value = 0.2): Promise<string> {
   return base64Of(await wavBytes(new Float32Array(samples).fill(value)));
 }
 
-function calls(): { text: string; sid: number; speed: number; threads: number; model: string }[] {
+function calls(): { text: string; sid: number; speed: number; threads?: number; model: string }[] {
   return plugin.synthesize.mock.calls.map(([options]) => options);
 }
 
@@ -63,8 +63,11 @@ describe('kokoroNativeEngine.synthesize on long sentences', () => {
     // No word may be lost at a seam: the clauses are the sentence with single spaces.
     expect(calls().map((call) => call.text).join(' ')).toBe(LONG_SENTENCE.replace(/\s+/g, ' ').trim());
     // Every clause uses the one resolution of voice, pace, threads and build.
+    // No saved thread count means "auto" (the plugin detects fast cores), so
+    // the option is omitted rather than pinned to 2.
     for (const call of calls()) {
-      expect(call).toMatchObject({ sid: 3, speed: 1, threads: 2, model: 'fp32' });
+      expect(call).toMatchObject({ sid: 3, speed: 1, model: 'fp32' });
+      expect(call.threads).toBeUndefined();
     }
     const joined = decodeWav16(new Uint8Array(await blob.arrayBuffer()));
     expect(joined.sampleRate).toBe(24000);

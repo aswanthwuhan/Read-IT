@@ -21,7 +21,6 @@ import VoiceTest from '../VoiceTest';
 import {
   DEFAULT_KOKORO_MODEL,
   DEFAULT_KOKORO_SID,
-  DEFAULT_KOKORO_THREADS,
   KOKORO_THREADS_SETTING,
   KOKORO_VOICE_SETTING,
   fp32Installed,
@@ -58,13 +57,15 @@ const ATTRIBUTION = 'Kokoro-82M by hexgrad (Apache-2.0) via sherpa-onnx (Apache-
 export { KOKORO_DOWNLOAD_ID };
 const SPEED_TEST_SENTENCE =
   'The old lighthouse keeper read a chapter of his favourite novel by the window.';
-const THREAD_OPTIONS = [1, 2, 4] as const;
+const THREAD_OPTIONS = [0, 1, 2, 4] as const;
 /**
- * Labels are literal, not derived from the default: 2 is "(recommended)" because it is the
- * balance the measurements picked, and 1 is the coolest option but usually finishes a
- * sentence behind real time.
+ * 0 is automatic: the plugin reads the phone's big.LITTLE frequency tiers and
+ * uses the fast cores (Marmalade's rule), which is usually the fastest and
+ * coolest setting. The fixed counts stay for A/B and for phones whose sysfs is
+ * unreadable.
  */
 const THREAD_LABELS: Record<number, string> = {
+  0: 'Auto (fast cores)',
   1: '1 thread (coolest, may pause between sentences)',
   2: '2 threads (recommended)',
   4: '4 threads (faster, gets hot)',
@@ -138,7 +139,7 @@ export default function KokoroNativePanel(): React.JSX.Element {
   const [measure, setMeasure] = useState<KokoroMeasureResult | null>(null);
 
   const savedVoice = useSetting<string>(KOKORO_VOICE_SETTING, String(DEFAULT_KOKORO_SID));
-  const savedThreads = useSetting<number>(KOKORO_THREADS_SETTING, DEFAULT_KOKORO_THREADS);
+  const savedThreads = useSetting<number | null>(KOKORO_THREADS_SETTING, null);
   /** The speed the book reads at; the test sample has to sound like the book. */
   const rate = useSetting<number>(TTS_RATE_SETTING, 1);
 
@@ -253,13 +254,13 @@ export default function KokoroNativePanel(): React.JSX.Element {
     ? savedVoice
     : voiceOptions[0].id;
   const savedThreadCount = Number(savedThreads);
-  // Exactly v0.3.3's rule: 1, 2 and 4 are the selector's options, and a count an older
-  // build stored (6, for example) is used as it is — shown as an extra "(saved)" option
-  // with the warmer-phone warning — rather than being silently rewritten.
+  // 0 is "Auto": the plugin picks this phone's fast cores. A count an older
+  // build stored (6, for example) is used as it is — shown as an extra
+  // "(saved)" option with the warmer-phone warning — rather than rewritten.
   const threads =
-    Number.isFinite(savedThreadCount) && savedThreadCount >= 1
+    typeof savedThreads === 'number' && Number.isFinite(savedThreadCount) && savedThreadCount >= 0
       ? Math.round(savedThreadCount)
-      : DEFAULT_KOKORO_THREADS;
+      : 0;
   const threadsOffered = (THREAD_OPTIONS as readonly number[]).includes(threads);
 
   // Sizes and install state per build, straight from the Java descriptors via status().

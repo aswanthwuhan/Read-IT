@@ -45,8 +45,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class KokoroPlugin extends Plugin {
 
     private static final String TAG = "KokoroPlugin";
-    /** 2 threads: about 0.75x real time on a mid-range phone without keeping 4 cores hot. */
-    private static final int DEFAULT_THREADS = 2;
     /** Longer text is a caller bug: one ONNX call per sentence, not per chapter. */
     private static final int MAX_TEXT_CHARS = 4000;
 
@@ -513,11 +511,16 @@ public class KokoroPlugin extends Plugin {
             "This phone ran out of memory running Kokoro. Choose 2 threads in Settings, close "
                     + "other apps, or use the system voice instead.";
 
+    /**
+     * Threads for a load when the caller sends none: the device's fast cores, as
+     * {@link CpuClusterDetector} reads them from cpufreq sysfs (Marmalade TTS's rule — skip
+     * the efficiency tier, drop a lone prime core when two other fast cores remain, and
+     * estimate {@code (availableProcessors + 1) / 2} when sysfs is unreadable, capped at 8).
+     * The settings panel always sends its saved {@code threads}, so an explicit choice still
+     * wins everywhere; this only feeds the panel's reported default and the no-argument load.
+     */
     private static int defaultThreads() {
-        int cores = Runtime.getRuntime().availableProcessors();
-        // No floor of 2: one thread is the coolest option the panel offers, and on a
-        // single-core phone it is the only honest default.
-        return Math.max(1, Math.min(DEFAULT_THREADS, cores));
+        return CpuClusterDetector.detectThreads();
     }
 
     private static void resolveCancelled(PluginCall call) {

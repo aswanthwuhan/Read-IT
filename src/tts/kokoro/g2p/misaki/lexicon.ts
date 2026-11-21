@@ -531,7 +531,7 @@ export class Lexicon {
       if (phonemes !== null && rating !== null) result.push([phonemes, rating]);
     };
 
-    if (workingWord.startsWith('-')) {
+    if (workingWord.startsWith('-') || workingWord.startsWith('−')) {
       pushLookup('minus', null);
       workingWord = workingWord.slice(1);
     }

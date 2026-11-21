@@ -6,7 +6,10 @@ import {
   MAX_CHUNK_DIGITS,
   MAX_CHUNK_WORDS,
   MODEL_TOKEN_LIMIT,
+  NATIVE_TOKEN_BUDGET,
   splitForModel,
+  splitForModelByTokens,
+  type WordTokenCounter,
 } from './modelText';
 
 const flatten = (text: string): string => text.trim().replace(/\s+/g, ' ');
@@ -94,6 +97,77 @@ describe('splitForModel', () => {
   it('documents the limit it exists to stay under', () => {
     // kokoro-js calls its tokenizer with `truncation: true`; 510 is that window.
     expect(MODEL_TOKEN_LIMIT).toBe(510);
+  });
+});
+
+describe('splitForModelByTokens', () => {
+  /** One token per word: the real G2P needs the fetched dictionaries. */
+  const wordTokens: WordTokenCounter = async (text) => {
+    const trimmed = text.trim();
+    return trimmed ? trimmed.split(/\s+/).map(() => 1) : null;
+  };
+  const tokensIn = async (text: string): Promise<number> =>
+    (await wordTokens(text))!.reduce((sum, count) => sum + count, 0);
+
+  it('returns nothing for blank text without asking the tokenizer', async () => {
+    let calls = 0;
+    const counting: WordTokenCounter = async (text) => {
+      calls += 1;
+      return wordTokens(text);
+    };
+    expect(await splitForModelByTokens('   \n ', 20, counting)).toEqual([]);
+    expect(await splitForModelByTokens('', 20, counting)).toEqual([]);
+    expect(calls).toBe(0);
+  });
+
+  it('keeps a sentence under the budget as one model call', async () => {
+    let calls = 0;
+    const counting: WordTokenCounter = async (text) => {
+      calls += 1;
+      return wordTokens(text);
+    };
+    const text = 'Resistance is mediated by beta-lactamase enzymes.';
+    expect(await splitForModelByTokens(text, NATIVE_TOKEN_BUDGET, counting)).toEqual([text]);
+    expect(calls).toBe(1);
+  });
+
+  it('splits a sentence the window cannot hold, keeping every word', async () => {
+    const chunks = await splitForModelByTokens(LONG_SENTENCE, 20, wordTokens);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join(' ')).toBe(flatten(LONG_SENTENCE));
+    for (const chunk of chunks) expect(await tokensIn(chunk)).toBeLessThanOrEqual(20);
+  });
+
+  it('prefers a clause seam when one closes inside the budget', async () => {
+    const text = `${words(25)},\n${words(25)}.`;
+    const chunks = await splitForModelByTokens(text, 30, wordTokens);
+    expect(chunks.length).toBe(2);
+    // The comma stays on the chunk it closes, so the seam is a breath, not a wrap.
+    expect(chunks[0]!.endsWith(',')).toBe(true);
+    expect(chunks.join(' ')).toBe(flatten(text));
+  });
+
+  it('breaks one over-long clause between words, never inside a word', async () => {
+    const text = words(60);
+    const chunks = await splitForModelByTokens(text, 20, wordTokens);
+    expect(chunks.length).toBeGreaterThan(1);
+    // Every chunk is whole words: rejoining reproduces the input exactly, and a
+    // cut inside a word would show up as a missing or extra space here.
+    expect(chunks.join(' ')).toBe(text);
+    for (const chunk of chunks) {
+      expect(await tokensIn(chunk)).toBeLessThanOrEqual(20);
+      for (const word of chunk.split(' ')) expect(text.split(' ')).toContain(word);
+    }
+  });
+
+  it('falls back to the web splitter while the dictionaries are offline', async () => {
+    const offline: WordTokenCounter = async () => null;
+    expect(await splitForModelByTokens(LONG_SENTENCE, 20, offline)).toEqual(splitForModel(LONG_SENTENCE));
+  });
+
+  it('aims below the model window, leaving headroom for the clause it measures', () => {
+    expect(NATIVE_TOKEN_BUDGET).toBe(480);
+    expect(NATIVE_TOKEN_BUDGET).toBeLessThan(MODEL_TOKEN_LIMIT);
   });
 });
 

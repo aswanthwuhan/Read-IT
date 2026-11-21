@@ -42,7 +42,7 @@ interface FeatureSpan {
   feature: FeatureKind;
 }
 
-const SUBTOKEN_REGEX = /^['‘’]+|\p{Lu}(?=\p{Lu}\p{Ll})|(?:^-)?(?:\p{Nd}?[,.]?\p{Nd})+|[-_]+|['‘’]{2,}|\p{L}*?(?:['‘’]\p{L})*?\p{Ll}(?=\p{Lu})|\p{L}+(?:['‘’]\p{L})*|[^\-_\p{L}'‘’\p{Nd}]|['‘’]+$/gu;
+const SUBTOKEN_REGEX = /^['‘’]+|\p{Lu}(?=\p{Lu}\p{Ll})|(?:^[-−])?(?:\p{Nd}?[,.]?\p{Nd})+|[-_]+|['‘’]{2,}|\p{L}*?(?:['‘’]\p{L})*?\p{Ll}(?=\p{Lu})|\p{L}+(?:['‘’]\p{L})*|[^\-_\p{L}'‘’\p{Nd}]|['‘’]+$/gu;
 const LINK_REGEX = /\[([^\]]+)\]\(([^)]*)\)/g;
 const LETTER = /^\p{L}$/u;
 const NUMBER = /^\p{N}$/u;
@@ -181,7 +181,9 @@ export class G2P {
   }
 
   static preprocess(text: string): { text: string; features: FeatureSpan[] } {
-    const trimmed = text.replace(/^\s+/u, '');
+    // Normalise the Unicode minus to ASCII before tokenising: the number rules
+    // and the subtoken regex both recognise `-`, and NFKC later does not.
+    const trimmed = text.replace(/^\s+/u, '').replaceAll('\u2212', '-');
     let result = '';
     const features: FeatureSpan[] = [];
     let current = 0;

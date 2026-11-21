@@ -42,4 +42,10 @@ describe('phonemizeWithLexicon', () => {
     const result = await phonemizeWithLexicon('Hello 20');
     expect(result.split(' ').filter(Boolean)).toHaveLength(2);
   });
+
+  it('handles decimals, negatives and grouped digits offline', async () => {
+    expect((await phonemizeWithLexicon('3.5')).split(' ').filter(Boolean)).toHaveLength(3);
+    expect((await phonemizeWithLexicon('-5')).split(' ').filter(Boolean)).toHaveLength(2);
+    expect((await phonemizeWithLexicon('1,000')).split(' ').filter(Boolean)).toHaveLength(2);
+  });
 });

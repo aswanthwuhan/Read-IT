@@ -407,11 +407,12 @@ describe('KokoroNativePanel', () => {
     expect(container.querySelectorAll('.btn-primary')).toHaveLength(0);
   });
 
-  it('offers one, two and four threads, labels 2 recommended and warns above two', async () => {
+  it('defaults to auto threads and offers one, two and four, warning above two', async () => {
     await render();
     const select = container.querySelector<HTMLSelectElement>('#kokoro-native-threads');
-    expect(select?.value).toBe('2');
+    expect(select?.value).toBe('0');
     expect([...(select?.options ?? [])].map((option) => option.textContent)).toEqual([
+      'Auto (fast cores)',
       '1 thread (coolest, may pause between sentences)',
       '2 threads (recommended)',
       '4 threads (faster, gets hot)',

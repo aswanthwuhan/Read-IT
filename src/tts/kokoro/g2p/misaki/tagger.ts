@@ -62,7 +62,14 @@ export function splitWords(text: string, abbreviations: ReadonlySet<string>): Ar
       index += 1;
       continue;
     }
-    if (!isWordChar(character)) {
+    // A leading minus belongs to the number only at the start of the text or
+    // after whitespace/opening punctuation ("-5", "(-5)"). A hyphen inside a
+    // word or between digits ("COVID-19", "1939-1945") must stay punctuation.
+    const previous = characters[index - 1];
+    const signedNumber = (character === '-' || character === '−')
+      && DIGIT.test(characters[index + 1] ?? '')
+      && (previous === undefined || /[\s([{“‘"']/u.test(previous));
+    if (!isWordChar(character) && !signedNumber) {
       spans.push({ start: offsets[index]!, end: offsets[index + 1]! });
       index += 1;
       continue;
@@ -163,7 +170,13 @@ export function mapWordTag(
     if (tags.has('Negative')) return 'RB';
     // Lower-case "a" is the article wherever compromise puts it ("a few" is a
     // `Value`, "a lot" a noun); as anything but `DT` Lexicon reads the letter A.
-    // A capital "A" can still be the letter ("plan A").
+    // compromise also tags the standalone letter in "plan A" / "grade A" as a
+    // Determiner, so use the following word: a noun means the article, nothing
+    // means the letter (which must not be spoken as "uh").
+    if (word === 'A') {
+      const article = next?.has('Noun') || next?.has('Adjective') || next?.has('Value') || next?.has('Person');
+      return article ? 'DT' : 'NNP';
+    }
     if (word === 'a' || word === 'an') return 'DT';
     // compromise finds phrasal verbs too eagerly ("stay in Boston") and can
     // even call "in" a noun ("keys in the car"). A noun phrase after it means
@@ -211,6 +224,8 @@ export function mapWordTag(
 function mapPunctuationTag(character: string, previous: string | undefined): string {
   if (Object.hasOwn(CURRENCIES, character)) return '$';
   if (character === '#') return '#';
+  // A slash is a spoken symbol ("1/2" → "one slash two"), not silence.
+  if (character === '/') return 'ADD';
   if (character === ',') return ',';
   if (character === '.' || character === '!' || character === '?') return '.';
   if (character === '(' || character === '[' || character === '{') return '-LRB-';
@@ -230,7 +245,11 @@ function mapPunctuationTag(character: string, previous: string | undefined): str
 export function tagText(text: string, abbreviations: ReadonlySet<string>): TaggedSlice[] {
   const spans = splitWords(text, abbreviations);
   if (spans.length === 0) return [];
-  const terms = spans.some((span) => isWordChar(text.slice(span.start, span.end).charAt(0)))
+  const isSignedNumber = (piece: string) => /^[-−]\p{N}/u.test(piece);
+  const terms = spans.some((span) => {
+    const piece = text.slice(span.start, span.end);
+    return isWordChar(piece.charAt(0)) || isSignedNumber(piece);
+  })
     ? wordTags(text)
     : [];
 
@@ -238,7 +257,7 @@ export function tagText(text: string, abbreviations: ReadonlySet<string>): Tagge
   return spans.map((span) => {
     const piece = text.slice(span.start, span.end);
     const first = Array.from(piece)[0]!;
-    if (!isWordChar(first)) {
+    if (!isWordChar(first) && !isSignedNumber(piece)) {
       return { ...span, tag: mapPunctuationTag(first, span.start > 0 ? text[span.start - 1] : undefined) };
     }
     while (termIndex < terms.length && terms[termIndex]!.end <= span.start) termIndex += 1;

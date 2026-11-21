@@ -7,10 +7,10 @@
  * current one plays, which hides most of the model latency on a phone CPU.
  */
 import { getSetting, setSetting } from '../../core/settings';
-import { tokensFor } from '../kokoro/g2p/index';
+import { tokensFor, warmLexicon } from '../kokoro/g2p/index';
 import type { SpeakEvents, TtsEngine, TtsVoice } from '../../core/types';
 import { planChunks } from '../neural/clauseChunk';
-import { splitForModel } from '../neural/modelText';
+import { splitForModelByTokens } from '../neural/modelText';
 import { modelState, type KokoroModelKey } from './kokoroDownload';
 import type { KokoroStage } from './kokoroFailure';
 import { DEFAULT_KOKORO_SID, KOKORO_VOICE_SETTING } from './kokoroSettings';
@@ -106,10 +106,15 @@ export function sidFromVoiceId(voiceId?: string): number {
  * and a count an older build stored (6, for example) is used as it is rather than silently
  * rewritten — the panel shows it as a "(saved)" option with the warmer-phone warning.
  */
-async function threadsSetting(): Promise<number> {
-  const saved = await getSetting<number>(KOKORO_THREADS_SETTING, DEFAULT_KOKORO_THREADS);
+async function threadsSetting(): Promise<number | undefined> {
+  const saved = await getSetting<number | null>(KOKORO_THREADS_SETTING, null);
   const threads = Math.round(Number(saved));
-  return Number.isFinite(threads) && threads > 0 ? clampNumber(threads, 1, MAX_THREADS) : DEFAULT_KOKORO_THREADS;
+  // No saved count (or 0, the panel's "Auto") means let the plugin pick this
+  // phone's fast cores via CpuClusterDetector; returning undefined omits the
+  // argument so the Java side applies that rule instead of a fixed 2.
+  return typeof saved === 'number' && Number.isFinite(threads) && threads > 0
+    ? clampNumber(threads, 1, MAX_THREADS)
+    : undefined;
 }
 
 /**
@@ -205,6 +210,10 @@ class KokoroNativeEngine implements TtsEngine {
     onStage?: (stage: KokoroStage) => void
   ): Promise<void> {
     requireNative();
+    // Start parsing the 16 MB G2P dictionaries now, while the model loads: the
+    // first sentence otherwise pays that cost on the UI thread (worker audit:
+    // ~1–4 s cold). The promise is memoised, so later calls are free.
+    warmLexicon();
     onStage?.('status');
     const requested = await modelSetting();
     // The requested build has to be on disk itself: the plugin reports the fallback it
@@ -237,7 +246,10 @@ class KokoroNativeEngine implements TtsEngine {
     // this process (a second reader mount) is reused instead of reloading the model. The
     // loaded build is compared too: an int8 session left by v0.3.3 is not a reuse.
     const loadedModel = status.loadedModel;
-    if (status.loaded && status.threads === threads && (loadedModel === requested || !loadedModel)) {
+    // An automatic count has no number to compare: whatever the warm session
+    // uses is this phone's detected count, so reuse it.
+    const threadsMatch = threads === undefined || status.threads === threads;
+    if (status.loaded && threadsMatch && (loadedModel === requested || !loadedModel)) {
       return;
     }
     onStage?.('load');
@@ -264,8 +276,10 @@ class KokoroNativeEngine implements TtsEngine {
    * the web one: handing it a whole long sentence loses the end of it, so the cached
    * clip ends in a whisper or mid-word. `speak()` already splits with `planChunks`;
    * this path — the one the reader actually plays from the cache — has to cut the
-   * same way. `splitForModel` is the web engine's splitter, kept in one place so
-   * both front ends make the same number of model calls for the same sentence.
+   * same way. `splitForModelByTokens` measures the real phoneme tokens with the
+   * same Misaki G2P the clauses are then phonemised with, so a sentence under the
+   * 510-token window is one model call and a longer one is cut only where needed
+   * (falling back to the web splitter's budgets while the dictionaries are offline).
    */
   async synthesize(text: string, opts: SpeakOptions): Promise<Blob> {
     requireNative();
@@ -282,7 +296,7 @@ class KokoroNativeEngine implements TtsEngine {
     const generation = this.generation;
 
     const blobs: Blob[] = [];
-    for (const clause of splitForModel(trimmed)) {
+    for (const clause of await splitForModelByTokens(trimmed)) {
       if (generation !== this.generation) throw new Error('Kokoro synthesis was cancelled.');
       // Pre-phonemise in JS: Android then uses the same Misaki rules as the web
       // engine (correct "High", "a", inflections and numbers) and sherpa skips
@@ -334,7 +348,17 @@ class KokoroNativeEngine implements TtsEngine {
       const synthesize = async (text: string): Promise<Blob | null> => {
         const trimmed = text.trim();
         if (!trimmed) return null;
-        const result = await Kokoro.synthesize({ text: trimmed, sid, speed, threads, model });
+        // Same JS pre-phonemisation as synthesize(): the streaming/voice-test
+        // path must not fall back to sherpa's own lexicon.
+        const tokens = await tokensFor(trimmed);
+        const result = await Kokoro.synthesize({
+          text: trimmed,
+          sid,
+          speed,
+          threads,
+          model,
+          tokens: tokens ? [tokens] : undefined,
+        });
         if (!alive() || result.cancelled || !result.wavBase64) return null;
         return base64ToWavBlob(result.wavBase64);
       };

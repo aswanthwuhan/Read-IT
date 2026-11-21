@@ -124,11 +124,15 @@ describe('kokoroNativeEngine.prepare', () => {
     expect(plugin.download).not.toHaveBeenCalled();
   });
 
-  it('loads with the default two threads when nothing was saved', async () => {
+  it('lets the plugin detect the fast cores when no thread count was saved', async () => {
     await kokoroNativeEngine.prepare();
 
+    // The Java side applies CpuClusterDetector; the JS layer must not force 2.
     expect(DEFAULT_KOKORO_THREADS).toBe(2);
-    expect(plugin.load).toHaveBeenCalledWith(expect.objectContaining({ threads: 2 }));
+    const call = (plugin.load as unknown as {
+      mock: { calls: Array<[{ threads?: number }]> };
+    }).mock.calls[0];
+    expect(call?.[0]?.threads).toBeUndefined();
   });
 
   it('keeps the two threads v0.3.3 saved instead of rewriting them', async () => {
