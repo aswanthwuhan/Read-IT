@@ -3,6 +3,7 @@ package app.readit.reader;
 import android.content.pm.ApplicationInfo;
 import android.os.Bundle;
 import android.util.Log;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import androidx.activity.OnBackPressedCallback;
@@ -53,6 +54,7 @@ public class MainActivity extends BridgeActivity {
         // can only be hidden from here.
         registerPlugin(SystemUiPlugin.class);
         super.onCreate(savedInstanceState);
+        hardenWebView();
         // NOTE: cross-origin isolation (COOP/COEP on the local asset server) was tried here and
         // does not work in the Android WebView: the headers reach the page, but
         // self.crossOriginIsolated stays false and COEP is not enforced. See docs/PERFORMANCE.md.
@@ -66,6 +68,25 @@ public class MainActivity extends BridgeActivity {
                 onSystemBackPressed();
             }
         });
+    }
+
+    /**
+     * The reader renders text it parsed itself and takes no HTML from the network into the
+     * WebView, so nothing needs file:// or content:// access. Capacitor serves the bundle from
+     * https://localhost, which keeps working with these off; turning them on would let a
+     * publisher file (or an injected string) read the app's private storage.
+     */
+    private void hardenWebView() {
+        WebView webView = bridge == null ? null : bridge.getWebView();
+        if (webView == null) return;
+        WebSettings settings = webView.getSettings();
+        settings.setAllowFileAccess(false);
+        settings.setAllowContentAccess(false);
+        settings.setAllowFileAccessFromFileURLs(false);
+        settings.setAllowUniversalAccessFromFileURLs(false);
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setSaveFormData(false);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     }
 
     @Override

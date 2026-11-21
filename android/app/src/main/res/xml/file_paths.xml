@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Capacitor's WebChromeClient writes a captured photo to
+  getExternalFilesDir(DIRECTORY_PICTURES) and returns it through this provider for
+  <input type="file" accept="image/*" capture>. Nothing else is shared.
+
+  This used to be <external-path path=".">, which maps to the root of shared
+  storage: every file on the device was inside the grantable set, and the photo
+  directory was not, so the camera path could not have worked anyway.
+-->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="my_images" path="." />
-    <cache-path name="my_cache_images" path="." />
+    <external-files-path name="captures" path="Pictures/" />
+    <cache-path name="cache" path="." />
 </paths>
