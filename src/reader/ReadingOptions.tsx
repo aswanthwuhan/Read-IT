@@ -41,6 +41,7 @@ const SKIP_ROWS: { key: SwitchKey; label: string; hint?: string }[] = [
   { key: 'figures', label: 'Figures & charts', hint: 'Their captions are a separate switch.' },
   { key: 'captions', label: 'Captions' },
   { key: 'formulas', label: 'Formulas', hint: 'Equations and structures.' },
+  { key: 'code', label: 'Code', hint: 'Listings and source samples.' },
   { key: 'headersFooters', label: 'Running headers & footers' },
   { key: 'footnotes', label: 'Footnotes' },
   { key: 'references', label: 'References', hint: 'The bibliography at the end of a chapter.' },
@@ -82,6 +83,7 @@ export default function ReadingOptions() {
   const figures = useSetting<boolean>(SKIP_KEY.figures, DEFAULT_SKIP.figures);
   const captions = useSetting<boolean>(SKIP_KEY.captions, DEFAULT_SKIP.captions);
   const formulas = useSetting<boolean>(SKIP_KEY.formulas, DEFAULT_SKIP.formulas);
+  const code = useSetting<boolean>(SKIP_KEY.code, DEFAULT_SKIP.code);
   const headersFooters = useSetting<boolean>(SKIP_KEY.headersFooters, DEFAULT_SKIP.headersFooters);
   const footnotes = useSetting<boolean>(SKIP_KEY.footnotes, DEFAULT_SKIP.footnotes);
   const references = useSetting<boolean>(SKIP_KEY.references, DEFAULT_SKIP.references);
@@ -102,6 +104,7 @@ export default function ReadingOptions() {
     figures,
     captions,
     formulas,
+    code,
     headersFooters,
     footnotes,
     references,

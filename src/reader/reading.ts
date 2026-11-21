@@ -25,6 +25,8 @@ export interface SkipOptions {
   figures: boolean;
   captions: boolean;
   formulas: boolean;
+  /** Source listings. A variable name read as prose is worse than silence. */
+  code: boolean;
   headersFooters: boolean;
   footnotes: boolean;
   references: boolean;
@@ -38,6 +40,7 @@ export const DEFAULT_SKIP: SkipOptions = {
   figures: true,
   captions: true,
   formulas: true,
+  code: true,
   headersFooters: true,
   footnotes: true,
   references: true,
@@ -51,6 +54,7 @@ const OPTIONAL: Partial<Record<BlockKind, SwitchKey>> = {
   figure: 'figures',
   caption: 'captions',
   formula: 'formulas',
+  code: 'code',
   header: 'headersFooters',
   footer: 'headersFooters',
   footnote: 'footnotes',
@@ -179,6 +183,8 @@ export function skippedLabel(kind: BlockKind): string {
       return 'Caption';
     case 'formula':
       return 'Formula';
+    case 'code':
+      return 'Code';
     case 'header':
     case 'footer':
       return 'Running head';
@@ -197,6 +203,7 @@ export const SKIP_KEY = {
   figures: 'read.skip.figures',
   captions: 'read.skip.captions',
   formulas: 'read.skip.formulas',
+  code: 'read.skip.code',
   headersFooters: 'read.skip.headersFooters',
   footnotes: 'read.skip.footnotes',
   references: 'read.skip.references',
@@ -292,13 +299,14 @@ export function useSkipOptions(): SkipOptions {
   const figures = useSetting<boolean>(SKIP_KEY.figures, DEFAULT_SKIP.figures);
   const captions = useSetting<boolean>(SKIP_KEY.captions, DEFAULT_SKIP.captions);
   const formulas = useSetting<boolean>(SKIP_KEY.formulas, DEFAULT_SKIP.formulas);
+  const code = useSetting<boolean>(SKIP_KEY.code, DEFAULT_SKIP.code);
   const headersFooters = useSetting<boolean>(SKIP_KEY.headersFooters, DEFAULT_SKIP.headersFooters);
   const footnotes = useSetting<boolean>(SKIP_KEY.footnotes, DEFAULT_SKIP.footnotes);
   const references = useSetting<boolean>(SKIP_KEY.references, DEFAULT_SKIP.references);
   const citations = useSetting<boolean>(SKIP_KEY.citations, DEFAULT_SKIP.citations);
   const brackets = useBracketMode();
   return useMemo(
-    () => ({ tables, figures, captions, formulas, headersFooters, footnotes, references, citations, brackets }),
-    [tables, figures, captions, formulas, headersFooters, footnotes, references, citations, brackets]
+    () => ({ tables, figures, captions, formulas, code, headersFooters, footnotes, references, citations, brackets }),
+    [tables, figures, captions, formulas, code, headersFooters, footnotes, references, citations, brackets]
   );
 }

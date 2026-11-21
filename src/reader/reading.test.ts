@@ -35,6 +35,7 @@ const SKIP_NONE = {
   figures: false,
   captions: false,
   formulas: false,
+  code: false,
   headersFooters: false,
   footnotes: false,
   references: false,
@@ -49,7 +50,7 @@ describe('planChapter', () => {
     expect(plan.skippedBlocks.size).toBe(0);
   });
 
-  it('leaves tables, figures, captions and formulas out of the voice', () => {
+  it('leaves tables, figures, captions, formulas and code out of the voice', () => {
     const plan = planChapter(
       chapter([
         block('b1', 'p', ['Text.']),
@@ -57,15 +58,16 @@ describe('planChapter', () => {
         block('b3', 'figure', ['Figure 2. Plasma curve.']),
         block('b4', 'caption', ['Caption.']),
         block('b5', 'formula', ['C = D / V']),
-        block('b6', 'footnote', ['Funded by a grant.']),
-        block('b7', 'reference', ['Smith J. 2019.']),
-        block('b8', 'p', ['More text.']),
+        block('b6', 'code', ['const x = compute(y);']),
+        block('b7', 'footnote', ['Funded by a grant.']),
+        block('b8', 'reference', ['Smith J. 2019.']),
+        block('b9', 'p', ['More text.']),
       ]),
       DEFAULT_SKIP,
       0,
     );
-    expect(plan.items.map((item) => item.id)).toEqual(['b1-0', 'b8-0']);
-    expect([...plan.skippedBlocks].sort()).toEqual(['b2', 'b3', 'b4', 'b5', 'b6', 'b7']);
+    expect(plan.items.map((item) => item.id)).toEqual(['b1-0', 'b9-0']);
+    expect([...plan.skippedBlocks].sort()).toEqual(['b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8']);
     expect(plan.blockKinds.get('b3')).toBe('figure');
   });
 
