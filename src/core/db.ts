@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import type { StoredContent } from './contentStore';
 import type { AudioCacheRecord, BookRecord, Bookmark, Highlight, LexiconEntry, Setting } from './types';
 
 /**
@@ -12,6 +13,7 @@ export class ReadItDB extends Dexie {
   lexicon!: Table<LexiconEntry, string>;
   audioCache!: Table<AudioCacheRecord, string>;
   settings!: Table<Setting, string>;
+  bookContent!: Table<StoredContent, string>;
 
   constructor(name = 'ReadItDB') {
     super(name);
@@ -22,6 +24,11 @@ export class ReadItDB extends Dexie {
       lexicon: 'id, source',
       audioCache: 'key, createdAt',
       settings: 'key',
+    });
+    // Documents leave `books` for their own table; version 1 must stay untouched
+    // because devices already have it.
+    this.version(2).stores({
+      bookContent: 'id',
     });
   }
 }

@@ -18,6 +18,7 @@ import {
 } from 'fflate';
 import type { Table } from 'dexie';
 import { db } from '../core/db';
+import type { StoredContent } from '../core/contentStore';
 import { isIos } from '../core/platform';
 import { BLOCK_KINDS } from '../core/types';
 import type {
@@ -33,10 +34,17 @@ import type {
 } from '../core/types';
 
 export const BACKUP_APP = 'Read IT';
-/** 2: one `data/books/<id>.json` entry per book instead of one huge books.json. */
-export const BACKUP_SCHEMA = 2;
+/**
+ * 2: one `data/books/<id>.json` entry per book instead of one huge books.json.
+ * 3: one `content/<id>.bin` entry per compressed document plus its codec in
+ *    `data/bookContent.json`.
+ */
+export const BACKUP_SCHEMA = 3;
 /** Format 1 zips (one `data/books.json`) must stay importable. */
 const LEGACY_SCHEMA = 1;
+/** Format 2 has no content store; it imports with the book rows alone. */
+const PREVIOUS_SCHEMA = 2;
+const READABLE_SCHEMAS = [LEGACY_SCHEMA, PREVIOUS_SCHEMA, BACKUP_SCHEMA];
 
 /**
  * Private settings are per-device. A credential and the base URL it belongs to
@@ -104,6 +112,8 @@ const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const BOOK_FILE_RE = /^books\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.(pdf|epub|docx|txt|md|html)$/;
 /** Schema 2: one book record per entry. The id pattern mirrors ID_RE. */
 const BOOK_JSON_RE = /^data\/books\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.json$/;
+/** Schema 3: already-compressed document bytes, one entry per book. */
+const CONTENT_BIN_RE = /^content\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.bin$/;
 
 /** Every table except the audio cache, which is rebuildable and huge. */
 function dataTables(): Table[] {
@@ -140,6 +150,8 @@ export function lastBackupLabel(last: number | undefined, now = Date.now()): str
 interface ZipEntry {
   name: string;
   data: Uint8Array | Blob;
+  /** Content bytes are already deflated; store them instead of deflating twice. */
+  store?: boolean;
 }
 
 export async function exportBackup({ includeBooks }: { includeBooks: boolean }): Promise<Blob> {
@@ -158,11 +170,26 @@ export async function exportBackup({ includeBooks }: { includeBooks: boolean }):
   }
 
   for (const table of dataTables()) {
-    if (table.name === 'books') continue;
+    if (table.name === 'books' || table.name === 'bookContent') continue;
     let rows: unknown[] = await table.toArray();
     if (table.name === 'settings') rows = rows.filter((row) => !isPrivateSetting(row as Setting));
     counts[table.name] = rows.length;
     entries.push({ name: `data/${table.name}.json`, data: strToU8(JSON.stringify(rows)) });
+  }
+
+  // Documents live outside the book rows, one entry each: the bytes are already
+  // deflated (or plain UTF-8), so a small manifest records how to read them.
+  const contentRows = (await db.bookContent.toArray()) as StoredContent[];
+  const contentManifest: { id: string; codec: StoredContent['codec'] }[] = [];
+  for (const row of contentRows) {
+    const bytes = contentRowBytes(row);
+    if (!bytes || !sourceId(row) || (row.codec !== 'deflate-raw' && row.codec !== 'none')) continue;
+    contentManifest.push({ id: row.id, codec: row.codec });
+    entries.push({ name: `content/${row.id}.bin`, data: new Uint8Array(bytes), store: true });
+  }
+  counts.bookContent = contentManifest.length;
+  if (contentManifest.length) {
+    entries.push({ name: 'data/bookContent.json', data: strToU8(JSON.stringify(contentManifest)) });
   }
 
   if (includeBooks) {
@@ -219,7 +246,9 @@ async function buildZip(entries: ZipEntry[]): Promise<Blob> {
         file.push(chunk, end === blob.size);
       }
     } else {
-      const file = new ZipDeflate(entry.name, { level: 6 });
+      const file = entry.store
+        ? new ZipPassThrough(entry.name)
+        : new ZipDeflate(entry.name, { level: 6 });
       zip.add(file);
       file.push(entry.data, true);
     }
@@ -243,7 +272,7 @@ export async function importBackup(file: Blob, mode: ImportMode): Promise<Import
 
   // Everything is validated and prepared before the write transaction opens, so
   // a bad record fails with the database untouched.
-  const payload = readPayload(files, tables);
+  const payload = await readPayload(files, tables);
   const bookRows = (payload.get('books') ?? []) as Omit<BookRecord, 'fileBlob'>[];
   checkBookFiles(files, bookRows);
 
@@ -279,6 +308,23 @@ function stripFileBlob(book: unknown): unknown {
   const copy = { ...(book as BookRecord) } as Partial<BookRecord>;
   delete copy.fileBlob;
   return copy;
+}
+
+/** Ids become zip paths, so a row with an unsafe id is never exported. */
+function sourceId(row: StoredContent): string | null {
+  return typeof row.id === 'string' && ID_RE.test(row.id) && !row.id.includes('..') ? row.id : null;
+}
+
+/** IndexedDB hands an ArrayBuffer back unchanged; hand-edited rows may not. */
+function contentRowBytes(row: StoredContent): ArrayBuffer | null {
+  const bytes: unknown = row.bytes;
+  if (bytes instanceof ArrayBuffer) return bytes;
+  // fake-indexeddb (tests) clones across realms, so instanceof is not enough.
+  if (Object.prototype.toString.call(bytes) === '[object ArrayBuffer]') return bytes as ArrayBuffer;
+  if (ArrayBuffer.isView(bytes)) {
+    return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength).slice().buffer;
+  }
+  return null;
 }
 
 /** Attach the raw file; books whose file is absent get an empty Blob. */
@@ -339,9 +385,9 @@ function checkManifest(files: Unzipped): void {
   if (parsed.app !== BACKUP_APP) {
     throw new Error('This zip is not a Read IT backup.');
   }
-  if (parsed.schema !== LEGACY_SCHEMA && parsed.schema !== BACKUP_SCHEMA) {
+  if (typeof parsed.schema !== 'number' || !READABLE_SCHEMAS.includes(parsed.schema)) {
     throw new Error(
-      `This backup uses format ${String(parsed.schema)}; this app reads formats ${LEGACY_SCHEMA} and ${BACKUP_SCHEMA}.`,
+      `This backup uses format ${String(parsed.schema)}; this app reads formats ${READABLE_SCHEMAS.join(', ')}.`,
     );
   }
 }
@@ -372,6 +418,10 @@ async function readZip(file: Blob): Promise<Unzipped> {
         filter: (info) => {
           // Directory entries carry no data and are harmless.
           if (info.name.endsWith('/')) return false;
+          // One oversized document must not cost the rest of the backup: drop
+          // just its entry. fflate never decompresses an entry the filter drops,
+          // so a hostile size here cannot become an allocation either.
+          if (CONTENT_BIN_RE.test(info.name) && info.originalSize > MAX_JSON_BYTES) return false;
           const problem = entryProblem(info);
           if (problem) {
             problems.push(problem);
@@ -420,12 +470,23 @@ function entryProblem(info: UnzipFileInfo): string | null {
     return null;
   }
   if (BOOK_FILE_RE.test(name)) return null;
+  // Oversized content bins are dropped by readZip's filter rather than refused:
+  // a damaged document must not cost the books around it.
+  if (CONTENT_BIN_RE.test(name)) return null;
   return `the entry "${name}" is not part of a Read IT backup`;
 }
 
-function readPayload(files: Unzipped, tables: Table[]): Map<string, unknown[]> {
+async function readPayload(files: Unzipped, tables: Table[]): Promise<Map<string, unknown[]>> {
   const payload = new Map<string, unknown[]>();
   for (const table of tables) {
+    if (table.name === 'bookContent') {
+      const rows = readContentRows(files);
+      if (rows.length > MAX_ROWS) {
+        throw new Error(`This backup is too large: "bookContent" has more than ${MAX_ROWS} records.`);
+      }
+      if (rows.length) payload.set(table.name, rows);
+      continue;
+    }
     const raw = table.name === 'books' ? readBookRows(files) : readTable(files, table.name);
     if (!raw) continue;
     if (raw.length > MAX_ROWS) {
@@ -437,6 +498,47 @@ function readPayload(files: Unzipped, tables: Table[]): Map<string, unknown[]> {
     payload.set(table.name, rows as unknown[]);
   }
   return payload;
+}
+
+/**
+ * Content arrives as one `content/<id>.bin` per document, with the codec in
+ * `data/bookContent.json`. An unreadable index, or a row whose id, codec or bytes
+ * are unusable, is skipped: a damaged document must not cost the whole backup.
+ * Bytes that defeat the decoder are left for `getContent`, which returns null
+ * instead of throwing; inflating every document during import would also turn a
+ * small deflate bomb into a large allocation on the phone.
+ */
+function readContentRows(files: Unzipped): StoredContent[] {
+  const manifestRaw = files['data/bookContent.json'];
+  if (!manifestRaw) return [];
+  delete files['data/bookContent.json'];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(strFromU8(manifestRaw));
+  } catch {
+    // The books and notes around a damaged index are still worth importing.
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const rows: StoredContent[] = [];
+  const seen = new Set<string>();
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const entry = item as { id?: unknown; codec?: unknown };
+    const id = typeof entry.id === 'string' && ID_RE.test(entry.id) && !entry.id.includes('..') ? entry.id : null;
+    if (!id || seen.has(id)) continue;
+    const codec = entry.codec;
+    if (codec !== 'deflate-raw' && codec !== 'none') continue;
+    const key = `content/${id}.bin`;
+    const bytes = files[key];
+    if (!bytes || bytes.byteLength > MAX_JSON_BYTES) continue;
+    delete files[key];
+    seen.add(id);
+    // A fresh ArrayBuffer: fflate may hand back a view into a larger buffer.
+    rows.push({ id, codec, bytes: new Uint8Array(bytes).buffer });
+  }
+  return rows;
 }
 
 /**
