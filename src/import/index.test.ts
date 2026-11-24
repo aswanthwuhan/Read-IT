@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../core/db';
+import { ARTICLE_HTML_MAX_BYTES } from './limits';
 
 const h = vi.hoisted(() => ({ native: { value: false } }));
 
@@ -52,6 +53,8 @@ describe('detectFormat', () => {
   it('returns null for slides and unknown types', () => {
     expect(detectFormat(new File(['x'], 'deck.pptx'))).toBeNull();
     expect(detectFormat(new File(['x'], 'blob', { type: 'application/zip' }))).toBeNull();
+    expect(detectFormat(new File(['x'], 'book.constructor'))).toBeNull();
+    expect(detectFormat(new File(['x'], 'notes.__proto__', { type: 'text/plain' }))).toBe('txt');
   });
 });
 
@@ -265,6 +268,24 @@ describe('deleteBook', () => {
 });
 
 describe('importUrl', () => {
+  it('uses browser fetch without following redirects or attaching credentials', async () => {
+    const fetchArticle = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+    vi.stubGlobal('fetch', fetchArticle);
+    await expect(importUrl('https://example.com/article')).rejects.toThrow(/404/);
+    expect(fetchArticle).toHaveBeenCalledWith('https://example.com/article', expect.objectContaining({
+      redirect: 'error',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+    }));
+  });
+
+  it('does not buffer a response if streaming is unavailable', async () => {
+    const text = vi.fn();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: null, text }));
+    await expect(importUrl('https://example.com/article')).rejects.toThrow(/paste the text/);
+    expect(text).not.toHaveBeenCalled();
+  });
+
   it('rejects addresses that are not http(s)', async () => {
     await expect(importUrl('file:///etc/passwd')).rejects.toThrow(/http/i);
     await expect(importUrl('not a url')).rejects.toThrow(/web address/i);
@@ -288,6 +309,18 @@ describe('importUrl', () => {
     );
 
     await expect(importUrl('https://example.com/missing')).rejects.toThrow(/404/);
+  });
+
+  it('stops reading an article as soon as its body crosses the size limit', async () => {
+    const reader = {
+      read: vi.fn().mockResolvedValue({ done: false, value: new Uint8Array(ARTICLE_HTML_MAX_BYTES + 1) }),
+      cancel: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: { getReader: () => reader } }));
+
+    await expect(importUrl('https://example.com/large')).rejects.toThrow(/too large/);
+    expect(reader.read).toHaveBeenCalledTimes(1);
+    expect(reader.cancel).toHaveBeenCalledTimes(1);
   });
 
   it('gives up on a site that never answers instead of hanging the library', async () => {

@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { BrowserRouter, Link, MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../core/db';
 import { getSetting } from '../core/settings';
@@ -42,7 +43,7 @@ const SECTION_TITLES = [
   'About',
 ];
 
-const html = renderToStaticMarkup(<SettingsPage />);
+const html = renderToStaticMarkup(<MemoryRouter><SettingsPage /></MemoryRouter>);
 
 /** The static page as a DOM, for the assertions that are easier that way. */
 function parse(source: string): HTMLElement {
@@ -70,7 +71,12 @@ async function mountPage(): Promise<{ host: HTMLElement; root: Root }> {
   document.body.append(host);
   const root = createRoot(host);
   await act(async () => {
-    root.render(<SettingsPage />);
+    root.render(
+      <BrowserRouter>
+        <Link to="/settings#pdf-layout">Open PDF layout through the router</Link>
+        <SettingsPage />
+      </BrowserRouter>,
+    );
   });
   await settle();
   live = { host, root };
@@ -249,6 +255,19 @@ describe('SettingsPage disclosure rows', () => {
     const { host } = await mountPage();
     expect(head(host, 'voice-models').getAttribute('aria-expanded')).toBe('true');
     expect(head(host, 'voice').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('opens a different row when the router changes the settings hash', async () => {
+    window.history.replaceState(null, '', '/settings#voice-models');
+    const { host } = await mountPage();
+    expect(head(host, 'voice-models').getAttribute('aria-expanded')).toBe('true');
+
+    await act(async () => {
+      host.querySelector<HTMLAnchorElement>('a[href="/settings#pdf-layout"]')!.click();
+    });
+
+    expect(head(host, 'pdf-layout').getAttribute('aria-expanded')).toBe('true');
+    expect(head(host, 'voice-models').getAttribute('aria-expanded')).toBe('false');
   });
 
   it('opens the row named by a later hash change', async () => {

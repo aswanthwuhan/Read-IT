@@ -6,7 +6,7 @@ Offline-first reader for books you already own: import your own PDF, EPUB, DOCX,
 and web articles, read them in a reflowing reader (or as PDF pages), and listen to them with
 on-device voices. Files, highlights and notes live in IndexedDB on your device only —
 no account, no backend, no server for reading. Apache-2.0.
-Version 0.6.1 is the current public Read IT release: Android, Windows and the web as an
+Version 0.6.2 is the current public Read IT release: Android, Windows and the web as an
 installable PWA. See `CHANGELOG.md`. The source is public at
 [github.com/aswanthwuhan/Read-IT](https://github.com/aswanthwuhan/Read-IT).
 
@@ -30,11 +30,11 @@ installable PWA. See `CHANGELOG.md`. The source is public at
 
 ## Download / install
 
-**Public source, private build pipeline.** v0.6.1 is the current release: the source is
+**Public source, private build pipeline.** v0.6.2 is the current release: the source is
 public on GitHub; the Android APK is an unsigned debug build for review and testing, and
 the store accounts are not open. What ships, and how you install it:
 
-**Android (APK).** Android 8.0 or newer with WebView 110+ is required. The v0.6.1 release is
+**Android (APK).** Android 8.0 or newer with WebView 110+ is required. The v0.6.2 release is
 a source release; build and install the APK with [docs/ANDROID.md](docs/ANDROID.md). A signed,
 store-ready APK is planned for the store launch.
 

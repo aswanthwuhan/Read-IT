@@ -5,7 +5,7 @@ import { normaliseText, type BlockSeed } from './blocks';
 import { parseNavDocument, parseNcx, type OutlineEntry } from './epub/nav';
 import { blocksFromRoot, chapterFromSpine } from './html';
 import { EPUB_IMPORT_MAX_BYTES, EPUB_TEXT_MAX_BYTES } from './limits';
-import { assertEntries } from './zipLimits';
+import { assertEntries, verifyZipOutput } from './zipLimits';
 
 /** The bits of an epubjs Section this module uses (the package has no exported type). */
 interface SpineSection {
@@ -40,6 +40,7 @@ export async function parseEpub(data: ArrayBuffer, fallbackTitle: string): Promi
   if (data.byteLength > EPUB_IMPORT_MAX_BYTES) {
     throw new Error('That EPUB is too large to import (over 100 MB).');
   }
+  verifyZipOutput(data);
   const book = ePub();
   try {
     // epubjs 0.3.93's ESM entry (the one bundlers pick) only builds the Book; its

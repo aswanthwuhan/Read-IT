@@ -23,7 +23,7 @@ import {
   KOKORO_VOICE_SETTING,
   setKokoroVoice,
 } from './neural/kokoro';
-import { pocketEngine } from './neural/pocket';
+import { clampPocketRate, POCKET_RATE_MAX, POCKET_RATE_MIN, pocketEngine } from './neural/pocket';
 import { POCKET_VOICES } from './neural/pocketVoices';
 import { kokoroSizeMb, POCKET_SIZE_MB } from './neural/sizes';
 import { kokoroFor } from './registry';
@@ -151,10 +151,6 @@ export function VoicePanel() {
   const [voices, setVoices] = useState<TtsVoice[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Leaving the panel must silence the platform voice. A model sample is stopped
-  // by its own VoiceTest, which is the only thing that started it.
-  useEffect(() => () => systemEngine.stop(), []);
-
   useEffect(() => {
     let alive = true;
     void systemEngine
@@ -185,13 +181,32 @@ export function VoicePanel() {
   const kokoroNative = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
   const kokoro = useMemo(() => kokoroFor(), []);
   const kokoroDownload = useDownload('kokoro');
+  const pocketDownload = useDownload('pocket');
   const [kokoroReady, setKokoroReady] = useState<boolean | null>(null);
+  const [pocketReady, setPocketReady] = useState<boolean | null>(null);
   const [kokoroVoices, setKokoroVoices] = useState<TtsVoice[]>([]);
   const pocketVoice = useSetting<string>(TTS_POCKET_VOICE_SETTING, POCKET_VOICES[0]?.id ?? 'alba');
   const kokoroVoice = useSetting<string>(
     kokoroNative ? NATIVE_KOKORO_VOICE_SETTING : KOKORO_VOICE_SETTING,
     kokoroNative ? String(DEFAULT_KOKORO_SID) : DEFAULT_KOKORO_VOICE,
   );
+
+  const wantsPocketState = shownEngine === 'pocket';
+  useEffect(() => {
+    if (!wantsPocketState) return;
+    let alive = true;
+    void pocketEngine.isReady().then(
+      (ready) => {
+        if (alive) setPocketReady(ready);
+      },
+      () => {
+        if (alive) setPocketReady(false);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [wantsPocketState, pocketDownload.status]);
 
   // The Kokoro list is only built while that engine is on screen. Its voices exist
   // before the model is downloaded, but a list that cannot speak is a dead control:
@@ -235,6 +250,7 @@ export function VoicePanel() {
       ? `${voices.length} system ${voices.length === 1 ? 'voice' : 'voices'} reported by this device.`
       : 'Voices are provided by the device; none were reported yet.'
     : 'Used when the system engine speaks.';
+  const pocketRate = clampPocketRate(rate);
 
   return (
     <div className="tts-panel">
@@ -444,6 +460,13 @@ export function VoicePanel() {
               voiceId={pocketVoice}
               rate={rate}
               sample={TEST_SENTENCE}
+              disabledReason={
+                pocketReady === null
+                  ? 'Checking whether Pocket TTS is downloaded.'
+                  : pocketReady
+                    ? null
+                    : 'Download Pocket TTS in Voice models to try this voice.'
+              }
             />
             <p className="field-hint tts-test-sentence">Speaks: “{TEST_SENTENCE}”</p>
           </div>
@@ -466,11 +489,14 @@ export function VoicePanel() {
             max={RATE_MAX}
             step={RATE_STEP}
             value={rate}
+            aria-describedby="tts-rate-hint"
             aria-valuetext={`${formatRate(rate)} times`}
             onChange={(e) => void setSetting(TTS_RATE_SETTING, Number(e.target.value))}
           />
-          <p className="field-hint">
-            {RATE_MIN}×–{RATE_MAX}×, applied to every engine.
+          <p className="field-hint" id="tts-rate-hint">
+            {shownEngine === 'pocket'
+              ? `Pocket TTS plays at ${formatRate(pocketRate)}×. Its range is ${POCKET_RATE_MIN.toFixed(2)}×–${POCKET_RATE_MAX.toFixed(2)}×.`
+              : `${RATE_MIN}×–${RATE_MAX}×.`}
           </p>
         </div>
       </div>
@@ -535,9 +561,14 @@ export function LexiconPanel() {
     }
     let alive = true;
     const timer = setTimeout(() => {
-      void expand(previewText).then((out) => {
-        if (alive) setPreviewResult(out);
-      });
+      void expand(previewText).then(
+        (out) => {
+          if (alive) setPreviewResult(out);
+        },
+        () => {
+          if (alive) setPreviewResult('The pronunciation preview could not be generated.');
+        },
+      );
     }, 150);
     return () => {
       alive = false;
@@ -851,6 +882,7 @@ export function CachePanel() {
 
   const clearCache = async () => {
     setClearing(true);
+    setStatus(null);
     setError(null);
     try {
       await clearAudio();

@@ -6,6 +6,7 @@ import type { AudioCacheRecord, TtsEngine } from '../core/types';
 import TtsSettings, {
   TEST_SENTENCE,
   TTS_ENGINE_SETTING,
+  TTS_RATE_SETTING,
   TTS_VOICE_SETTING,
   VOICE_TIP,
   filterEntries,
@@ -15,6 +16,7 @@ import { getSetting, setSetting } from '../core/settings';
 import { systemEngine } from './system';
 import { invalidate, listLexiconEntries, saveUserEntry } from './lexicon';
 import { putAudio } from './cache';
+import { pocketEngine } from './neural/pocket';
 
 /** What the browser can run; false stands for iOS 15.4–16.3. */
 const caps = vi.hoisted(() => ({ supported: true }));
@@ -480,6 +482,28 @@ describe('TtsSettings', () => {
     expect(buttonWithText('Download Kokoro')).toBeDefined();
     expect(container.querySelectorAll('input[name="tts-kokoro-voice"]')).toHaveLength(0);
     expect(container.querySelector('#tts-voice')).toBeNull();
+  });
+
+  it('prevents a Pocket sample from starting a model download', async () => {
+    await setSetting(TTS_ENGINE_SETTING, 'pocket');
+    vi.spyOn(pocketEngine, 'isReady').mockResolvedValue(false);
+    await mount();
+
+    await waitFor(() =>
+      container.textContent!.includes('Download Pocket TTS in Voice models to try this voice.'),
+    );
+    expect(buttonWithText('Test voice')?.disabled).toBe(true);
+  });
+
+  it('allows a Pocket sample from a downloaded model', async () => {
+    await setSetting(TTS_ENGINE_SETTING, 'pocket');
+    await setSetting(TTS_RATE_SETTING, 2);
+    vi.spyOn(pocketEngine, 'isReady').mockResolvedValue(true);
+    await mount();
+
+    await waitFor(() => buttonWithText('Test voice')?.disabled === false);
+    expect(container.querySelector('#tts-rate-hint')?.textContent).toContain('plays at 1.25×');
+    expect(await getSetting(TTS_RATE_SETTING, 1)).toBe(2);
   });
 
   it('shows each engine’s own voice controls only for that engine', async () => {

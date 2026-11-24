@@ -1,5 +1,25 @@
 # Changelog
 
+## Read IT 0.6.2 — 2026-11-24
+
+Maintenance release for imports, reader controls and speech playback.
+
+**Fixed — speech playback and highlighting**
+- Stale speech callbacks no longer move the highlight after seeking or stopping, and estimated timing no longer overwrites real word boundaries.
+- Pause, resume and overlapping playback requests handle interrupted speech more reliably.
+
+**Fixed — importing and library progress**
+- Import requests are protected against duplicate actions, and import panels recover more reliably after errors or navigation.
+- Missing saved chapters or sentences no longer appear as completed books.
+- Sparse PDF warnings explain that available text can still be read and listened to; OCR remains unsupported.
+- EPUB and DOCX archives are checked against their actual decompressed sizes before parsing.
+
+**Improved — reader controls and accessibility**
+- Keyboard focus, dialog navigation, text selection and reader controls behave more consistently.
+- Voice and layout-model settings handle busy states and errors more clearly.
+- The tutorial gives clearer guidance about imports and on-device voices.
+- User pronunciation regexes are restricted to fixed-text patterns with optional word boundaries to avoid blocking playback.
+
 ## Read IT 0.6.1 — 2026-11-21
 
 **Fixed — the first word of a line is spoken in full**

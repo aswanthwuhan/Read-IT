@@ -77,6 +77,12 @@ describe('expand', () => {
 });
 
 describe('editor helpers', () => {
+  it('refuses unsupported user regexes and skips them when loaded from existing data', async () => {
+    const rule = { pattern: 'cat|dog', replacement: 'pet', isRegex: true };
+    await expect(saveUserEntry(rule)).rejects.toThrow(/fixed-text regex/);
+    expect(applyEntry('cat dog', { ...rule, id: 'u-1', source: 'user', enabled: true })).toBe('cat dog');
+  });
+
   it('lists, saves and deletes user entries', async () => {
     const saved = await saveUserEntry({ pattern: 'Siobhan', replacement: 'Shi-vawn', isRegex: true });
     const listed = await listLexiconEntries();

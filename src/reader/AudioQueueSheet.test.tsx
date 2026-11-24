@@ -146,6 +146,7 @@ describe('AudioQueueSheet', () => {
     // Chosen in reverse: the queue still follows the book.
     await click(box('Dynamics'));
     await click(box('Kinetics'));
+    primary().focus();
     await click(primary());
 
     expect(props.onSave).toHaveBeenCalledWith({ kind: 'chapters', chapterIndexes: [0, 1] });
@@ -160,7 +161,14 @@ describe('AudioQueueSheet', () => {
     expect(bar?.getAttribute('aria-valuenow')).toBe('14');
     expect(bar?.getAttribute('aria-valuemax')).toBe('20');
 
-    await click(buttonByText('Stop saving'));
+    const stop = buttonByText('Stop saving');
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Tab',
+      bubbles: true,
+      cancelable: true,
+    }));
+    expect(document.activeElement).toBe(stop);
+    await click(stop);
     expect(props.onCancelQueue).toHaveBeenCalledTimes(1);
 
     await click(buttonByText('Close'));
@@ -178,6 +186,11 @@ describe('AudioQueueSheet', () => {
     // Nothing entered yet.
     expect(primary().disabled).toBe(true);
     expect(hint()).toBe('Enter the first and last page.');
+
+    await type(inputs[0]!, '1.5');
+    await type(inputs[1]!, '2');
+    expect(hint()).toBe('Pages are whole numbers.');
+    expect(primary().disabled).toBe(true);
 
     await type(inputs[0]!, '5');
     await type(inputs[1]!, '6');
@@ -206,6 +219,25 @@ describe('AudioQueueSheet', () => {
   it('does not offer pages for a text book', async () => {
     await renderSheet(makeProps());
     expect(container.textContent).not.toContain('Pages');
+  });
+
+  it('excludes selected chapters that no longer have readable sentences', async () => {
+    const props = makeProps();
+    await renderSheet(props);
+    await click(box('Dynamics'));
+
+    await rerender({
+      ...props,
+      chapters: CHAPTERS.map((chapter) =>
+        chapter.index === 1 ? { ...chapter, sentences: 0 } : chapter,
+      ),
+    });
+
+    expect(box('Dynamics').disabled).toBe(true);
+    expect(box('Dynamics').checked).toBe(false);
+    expect(primary().disabled).toBe(true);
+    await click(primary());
+    expect(props.onSave).not.toHaveBeenCalled();
   });
 
   it('closes on Escape, the backdrop and the back key without touching the queue', async () => {

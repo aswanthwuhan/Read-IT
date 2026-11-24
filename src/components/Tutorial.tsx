@@ -8,7 +8,7 @@
  * returns to the route the tour started on.
  */
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import './Tutorial.css';
 import { pushBackHandler } from '../core/backButton';
 import { db } from '../core/db';
@@ -20,8 +20,8 @@ export const TUTORIAL_SEEN_KEY = 'tutorialSeen';
 /** Fired on `window` to open the tour from anywhere (Settings → About). */
 export const TUTORIAL_START_EVENT = 'readit:start-tutorial';
 
-export function startTutorial(): void {
-  window.dispatchEvent(new Event(TUTORIAL_START_EVENT));
+export function startTutorial(opener?: HTMLElement): void {
+  window.dispatchEvent(new CustomEvent(TUTORIAL_START_EVENT, { detail: opener }));
 }
 
 export interface TutorialStep {
@@ -48,7 +48,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/',
     target: 'import',
     title: 'Import a book',
-    body: 'Tap Import and choose a PDF, EPUB, DOCX, TXT, Markdown or HTML file. It stays on this device and nothing is uploaded. A scanned PDF has no text layer, so it opens empty and cannot be read aloud.',
+    body: 'Tap Import and choose a PDF, EPUB, DOCX, TXT, Markdown or HTML file. It stays on this device and nothing is uploaded. Image-only PDFs need a text layer added with OCR before you can import them.',
   },
   {
     id: 'library-pdf-kind',
@@ -227,19 +227,25 @@ interface Box {
 }
 
 export interface TutorialProps {
+  opener?: HTMLElement;
   /** Removes the tour; focus returns to whatever opened it. */
   onClose: () => void;
 }
 
-export default function Tutorial({ onClose }: TutorialProps) {
+export default function Tutorial({ opener: trigger, onClose }: TutorialProps) {
   const navigate = useNavigate();
+  const { pathname, search, hash, state, key } = useLocation();
+  const navigationType = useNavigationType();
+  const route = pathname + search + hash;
   const titleId = useId();
   const cardRef = useRef<HTMLDivElement>(null);
   const nextRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const openerNameRef = useRef<string>('');
   const openerSectionRef = useRef<string>('');
-  const startRouteRef = useRef<string>(window.location.pathname);
+  const startRouteRef = useRef(route);
+  const startRouteStateRef = useRef(state);
+  const locationKeyRef = useRef(key);
 
   const [book, setBook] = useState<BookRecord | null | undefined>(undefined);
   const [index, setIndex] = useState(0);
@@ -279,44 +285,49 @@ export default function Tutorial({ onClose }: TutorialProps) {
     };
   }, []);
 
-  const closeRef = useRef<() => void>(() => undefined);
-  closeRef.current = () => {
+  const closeRef = useRef<(restoreRoute?: boolean) => void>(() => undefined);
+  closeRef.current = (restoreRoute = true) => {
     // Fire-and-forget: a failed write only means the tour may greet once more.
     void setSetting(TUTORIAL_SEEN_KEY, true).catch(() => undefined);
+
+    if (!restoreRoute) {
+      onClose();
+      return;
+    }
 
     const opener = openerRef.current;
     const openerName = openerNameRef.current;
     const openerSection = openerSectionRef.current;
     const startRoute = startRouteRef.current;
 
-    if (window.location.pathname !== startRoute) navigate(startRoute);
+    if (route !== startRoute || state !== startRouteStateRef.current) {
+      navigate(startRoute, { replace: true, state: startRouteStateRef.current });
+    }
     onClose();
 
-    // The page can remount on the way back (Settings loses its open row), so the
-    // opener may be gone: fall back to its row, then to a control with its name.
-    window.setTimeout(() => {
+    // The original route can take a few frames to remount after navigation.
+    const deadline = performance.now() + 500;
+    function restoreFocus() {
       if (opener && isFocusable(opener)) {
         opener.focus();
         return;
       }
-      const head = openerSection ? document.getElementById(openerSection)?.querySelector<HTMLElement>('.disc-head') : null;
-      if (head && isFocusable(head)) {
-        head.focus();
-        return;
-      }
-      if (!openerName) return;
-      const match = [...document.querySelectorAll<HTMLElement>('button, a[href]')].find(
+      const section = openerSection ? document.getElementById(openerSection) : document;
+      const match = [...(section?.querySelectorAll<HTMLElement>('button, a[href]') ?? [])].find(
         (candidate) =>
           isFocusable(candidate) &&
           (candidate.getAttribute('aria-label') ?? candidate.textContent?.trim()) === openerName,
       );
-      match?.focus();
-    }, 0);
+      if (match) match.focus();
+      else if (performance.now() < deadline) window.requestAnimationFrame(restoreFocus);
+      else if (openerSection) section?.querySelector<HTMLElement>('.disc-head')?.focus();
+    }
+    if (opener) window.requestAnimationFrame(restoreFocus);
   };
 
   useEffect(() => {
     const active = document.activeElement;
-    const opener = active instanceof HTMLElement && active !== document.body ? active : null;
+    const opener = trigger ?? (active instanceof HTMLElement && active !== document.body ? active : null);
     openerRef.current = opener;
     if (opener) {
       openerNameRef.current = opener.getAttribute('aria-label') ?? opener.textContent?.trim() ?? '';
@@ -358,13 +369,23 @@ export default function Tutorial({ onClose }: TutorialProps) {
       document.removeEventListener('keydown', onKeyDown);
       dispose();
     };
-  }, []);
+  }, [trigger]);
 
   // Moving to a step: go to its page, then find, scroll to and measure the
   // control. Pages mount asynchronously, so the lookup retries for about a
   // second before the card falls back to the bottom of the screen.
   useEffect(() => {
+    const movedInHistory = locationKeyRef.current !== key && navigationType === 'POP';
+    locationKeyRef.current = key;
+    if (movedInHistory) {
+      closeRef.current(false);
+      return;
+    }
     if (!steps || !step) return;
+    if (step.route && step.route !== route) {
+      navigate(step.route, { replace: true });
+      return;
+    }
     setBox(null);
     setResolved(false);
     setPos(null);
@@ -457,19 +478,6 @@ export default function Tutorial({ onClose }: TutorialProps) {
       retry = window.setTimeout(() => keepLooking(deadline), 250);
     }
 
-    if (step.route) {
-      const here = window.location.pathname + window.location.search + window.location.hash;
-      if (step.route !== here) {
-        const path = window.location.pathname;
-        navigate(step.route);
-        // A router push changes the hash without firing `hashchange`, which is
-        // what Settings listens for to open a row. Only same-page moves need it.
-        if (step.route.includes('#') && window.location.pathname === path) {
-          window.dispatchEvent(new Event('hashchange'));
-        }
-      }
-    }
-
     // Wait one frame so the new route can paint before the first lookup.
     frame = nextFrame(() => {
       if (!cancelled) find(Date.now() + 1000);
@@ -483,7 +491,7 @@ export default function Tutorial({ onClose }: TutorialProps) {
       window.removeEventListener('scroll', measure, true);
       window.removeEventListener('resize', measure);
     };
-  }, [index, steps, step, navigate]);
+  }, [index, steps, step, navigate, route, key, navigationType]);
 
   // Focus goes to the tour's Next button on every step.
   useEffect(() => {
@@ -502,13 +510,14 @@ export default function Tutorial({ onClose }: TutorialProps) {
     const vw = window.innerWidth || document.documentElement.clientWidth || 0;
     const vh = window.innerHeight || document.documentElement.clientHeight || 0;
     const width = card.offsetWidth || Math.min(352, Math.max(0, vw - 32));
-    const height = card.offsetHeight;    const gap = 12;
+    const height = card.offsetHeight;
+    const gap = 12;
     const margin = 16;
     let top = box.top + box.height + gap;
     if (top + height > vh - margin) top = box.top - height - gap;
     // A long card fits neither side of a centred target on a short phone: bring
     // the target to the top so the card clears it. The scroll re-measures the box.
-    if (top < margin && box.top > margin + 8 && typeof window.scrollBy === 'function') {
+    if (height > 0 && top < margin && box.top > margin + 8 && typeof window.scrollBy === 'function') {
       window.scrollBy(0, box.top - margin - 6);
     }
     top = Math.max(margin, Math.min(top, vh - height - margin));

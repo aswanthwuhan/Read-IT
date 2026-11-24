@@ -113,6 +113,19 @@ describe('reanalyseBook', () => {
     expect((await db.books.get('book'))?.lastPos).toEqual({ chapterId: 'ch-1', sentenceId: '1-0-0' });
   });
 
+  it('preserves a newer reading position saved while parsing runs', async () => {
+    await addBook(doc({ Intro: [['One.', 'Two.']] }), { lastPos: { chapterId: 'ch-0', sentenceId: '0-0-0' } });
+    parsesTo(doc({ Intro: [['Lead-in.'], ['One.', 'Two.']] }));
+
+    let saved: Promise<unknown> | undefined;
+    await reanalyseBook('book', () => {
+      saved = db.books.update('book', { lastPos: { chapterId: 'ch-0', sentenceId: '0-0-1' } });
+    });
+    await saved;
+
+    expect((await db.books.get('book'))?.lastPos).toEqual({ chapterId: 'ch-0', sentenceId: '0-1-1' });
+  });
+
   it('keeps a mark on a repeated sentence at its own occurrence, not the first one in the book', async () => {
     const repeated = doc({
       Diuretics: [['Mechanism of action', 'Blocks the NCC.']],
@@ -244,6 +257,14 @@ describe('setBookColumns', () => {
 });
 
 describe('importFileDetailed (PDF)', () => {
+  it('explains how to import an image-only scan with no readable text', async () => {
+    next.result = { doc: doc({}), charsPerPage: 0, pageCount: 6, layout: 'heuristic', modelPages: 0 };
+    const file = new File(['%PDF-1.4 scan'], 'scan.pdf', { type: 'application/pdf' });
+
+    await expect(importFileDetailed(file)).rejects.toThrow(/require OCR before import/);
+    expect(await db.books.count()).toBe(0);
+  });
+
   it('reads the picked file once and stores the layout that read it', async () => {
     parsesTo(doc({ Intro: [['One.']] }), 'model');
     const file = new File(['%PDF-1.4 a page of a paper'], 'paper.pdf', { type: 'application/pdf' });

@@ -1,4 +1,3 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { db, newId } from '../core/db';
 import { deleteContent, putContent } from '../core/contentStore';
 import { isIos } from '../core/platform';
@@ -48,8 +47,9 @@ export interface NamedBlob {
 
 export function detectFormat(file: NamedBlob): DocFormat | null {
   const extension = (file.name ?? '').split('.').pop()?.toLowerCase() ?? '';
-  const byExtension = FORMAT_BY_EXT[extension];
-  if (byExtension) return byExtension;
+  if (Object.prototype.hasOwnProperty.call(FORMAT_BY_EXT, extension)) {
+    return FORMAT_BY_EXT[extension];
+  }
 
   const mime = file.type.toLowerCase();
   if (mime === 'application/pdf') return 'pdf';
@@ -113,6 +113,9 @@ async function parseFile(
         onProgress?.(phase === 'layout' ? `Analysing layout: page ${done} of ${total}` : `page ${done} of ${total}`);
       }, { layout: options.pdfLayout });
       // Under ~50 characters per page there is no real text layer: a scan.
+      if (!parsed.doc.chapters.length && parsed.charsPerPage < 50) {
+        throw new Error('No readable text found in this PDF. Image-only scans require OCR before import.');
+      }
       const warning =
         parsed.charsPerPage < 50 ? 'Looks scanned — OCR not supported yet' : parsed.modelNote;
       return { doc: parsed.doc, warning, layout: parsed.layout };
@@ -274,17 +277,13 @@ const tooLargePage = () =>
 
 /**
  * Read a browser fetch body as text with a hard length cap, throwing as soon as
- * the content grows past it. Responses without a stream (and the native
- * Capacitor path, which returns the text up front) are checked by the caller
- * after reading instead.
+ * the content grows past it. A stream is required to enforce the limit before
+ * the response is buffered in memory.
  */
 async function readCappedText(response: Response, cap: number): Promise<string> {
   const reader = response.body?.getReader?.();
   if (!reader) {
-    // A patched/polyfilled fetch may expose only text(); the cap still applies.
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > cap) throw tooLargePage();
-    return text;
+    throw new Error('This browser cannot stream article imports.');
   }
   const decoder = new TextDecoder();
   let out = '';
@@ -295,29 +294,29 @@ async function readCappedText(response: Response, cap: number): Promise<string> 
     // Cap the raw bytes, not the decoded string: a multibyte character can take
     // fewer UTF-16 code units than the bytes that made it.
     byteLength += value.byteLength;
+    if (byteLength > cap) {
+      // Stop the download even though we already have the response headers.
+      void reader.cancel().catch(() => undefined);
+      throw tooLargePage();
+    }
     out += decoder.decode(value, { stream: true });
-    if (byteLength > cap) throw tooLargePage();
   }
   out += decoder.decode();
-  if (byteLength > cap) throw tooLargePage();
   return out;
 }
 
-/**
- * Fetch a page and keep its article text. On native builds Capacitor patches
- * `fetch` so cross-origin requests work; in a plain browser most sites refuse.
- */
-/** Loopback/private/link-local hosts: never fetch from the device's own network. */
+/** Reject explicit local hostnames and non-public address literals early. */
 function isPrivateAddress(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const host = hostname.toLowerCase().replace(/^\[|\]$|\.$/g, '');
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
-  if (host.includes(':') && (host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd'))) {
-    return true;
-  }
+  // Only global-unicast IPv6 literals are accepted. This also excludes
+  // IPv4-mapped forms, which otherwise bypass the IPv4 checks below.
+  if (host.includes(':')) return !/^[23][\da-f]{3}:/.test(host);
   const parts = host.split('.').map(Number);
   if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
   const [a, b] = parts as [number, number, number, number];
-  return a === 0 || a === 10 || a === 127
+  return a === 0 || a === 10 || a === 127 || a >= 224
+    || (a === 100 && b >= 64 && b <= 127)
     || (a === 169 && b === 254)
     || (a === 172 && b >= 16 && b <= 31)
     || (a === 192 && b === 168);
@@ -333,8 +332,9 @@ export async function importUrl(url: string): Promise<string> {
   if (target.protocol !== 'http:' && target.protocol !== 'https:') {
     throw new Error('Only http and https addresses can be imported.');
   }
-  // A user-supplied URL must not become a request into the LAN or metadata
-  // service; native HTTP has no CORS wall to stop it.
+  if (target.username || target.password) {
+    throw new Error('Article addresses cannot contain credentials.');
+  }
   if (isPrivateAddress(target.hostname)) {
     throw new Error('That address is on a private network and cannot be imported.');
   }
@@ -346,23 +346,18 @@ export async function importUrl(url: string): Promise<string> {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 20_000);
   try {
-    if (Capacitor.isNativePlatform()) {
-      // Native HTTP sidesteps CORS for article pages; global fetch patching is off so model downloads stay streamed.
-      const response = await CapacitorHttp.get({ url: target.toString(), responseType: 'text', connectTimeout: 20_000, readTimeout: 20_000 });
-      if (response.status < 200 || response.status >= 300) {
-        throw new Error(`That page returned ${response.status}; paste the text instead.`);
-      }
-      html = String(response.data ?? '');
-      if (new TextEncoder().encode(html).byteLength > ARTICLE_HTML_MAX_BYTES) throw tooLargePage();
-    } else {
-      const response = await fetch(target.toString(), { signal: abort.signal });
-      if (!response.ok) {
-        throw new Error(`That page returned ${response.status}; paste the text instead.`);
-      }
-      const length = Number(response.headers?.get?.('content-length'));
-      if (Number.isFinite(length) && length > ARTICLE_HTML_MAX_BYTES) throw tooLargePage();
-      html = await readCappedText(response, ARTICLE_HTML_MAX_BYTES);
+    const response = await fetch(target.toString(), {
+      signal: abort.signal,
+      redirect: 'error',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+    });
+    if (!response.ok) {
+      throw new Error(`That page returned ${response.status}; paste the text instead.`);
     }
+    const length = Number(response.headers?.get?.('content-length'));
+    if (Number.isFinite(length) && length > ARTICLE_HTML_MAX_BYTES) throw tooLargePage();
+    html = await readCappedText(response, ARTICLE_HTML_MAX_BYTES);
   } catch (error) {
     if (
       error instanceof Error &&
@@ -507,13 +502,12 @@ async function reparseBook(
   );
   if (!parsed.doc.chapters.length) throw new Error('No readable text found in this file.');
 
-  const before = sentenceIndex(book.parsed);
   const after = sentenceIndex(parsed.doc);
   const result: ReanalyseResult = {
     layout: parsed.layout,
     modelPages: parsed.modelPages,
     modelNote: parsed.modelNote,
-    sentencesBefore: before.flat.length,
+    sentencesBefore: 0,
     sentencesAfter: after.flat.length,
     highlightsKept: 0,
     highlightsUnlinked: 0,
@@ -522,14 +516,23 @@ async function reparseBook(
     positionKept: true,
   };
 
-  const moved = (position: Position | undefined): Position | undefined => {
-    if (!position) return undefined;
-    const place = relocate(position.sentenceId, before, after);
-    if (!place.exact) result.positionKept = false;
-    return { chapterId: place.sentence.chapterId, sentenceId: place.sentence.id };
-  };
-
   await db.transaction('rw', [db.books, db.highlights, db.bookmarks, db.settings], async () => {
+    const current = await db.books.get(book.id);
+    if (!current) throw new Error('This book was removed while its PDF was being read.');
+    if (saveColumns === undefined && (current.columns ?? 'auto') !== columns) {
+      throw new Error('The column setting changed while this PDF was being read. Try re-analysing it again.');
+    }
+    // Reading marks may have changed while the PDF parser was working. Remap
+    // them against the document and position that are current at commit time.
+    const before = sentenceIndex(current.parsed);
+    result.sentencesBefore = before.flat.length;
+    const moved = (position: Position | undefined): Position | undefined => {
+      if (!position) return undefined;
+      const place = relocate(position.sentenceId, before, after);
+      if (!place.exact) result.positionKept = false;
+      return { chapterId: place.sentence.chapterId, sentenceId: place.sentence.id };
+    };
+
     for (const highlight of await db.highlights.where('bookId').equals(book.id).toArray()) {
       const ids = matchRun(highlight.sentenceIds, before, after);
       if (ids.length) result.highlightsKept += 1;
@@ -553,7 +556,7 @@ async function reparseBook(
 
     await db.books.update(book.id, {
       parsed: parsed.doc,
-      lastPos: moved(book.lastPos),
+      lastPos: moved(current.lastPos),
       layout: parsed.layout,
       ...(saveColumns === undefined ? {} : { columns: saveColumns }),
     });

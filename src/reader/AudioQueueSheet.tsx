@@ -68,23 +68,27 @@ export default function AudioQueueSheet({
   const running = progress !== null;
   const canPickPages = pageCount !== undefined && pageCount > 0;
   const selectable = chapters.filter((chapter) => chapter.sentences > 0);
-  const chosen = chapters.filter((chapter) => selected.has(chapter.index)).map((chapter) => chapter.index);
-  const allChosen = selectable.length > 0 && selectable.every((chapter) => selected.has(chapter.index));
+  const chosen = selectable.filter((chapter) => selected.has(chapter.index)).map((chapter) => chapter.index);
+  const allChosen = chosen.length === selectable.length;
 
-  const fromPage = Number.parseInt(from, 10);
-  const toPage = Number.parseInt(to, 10);
-  const bothPages = Number.isFinite(fromPage) && Number.isFinite(toPage);
+  const fromPage = Number(from);
+  const toPage = Number(to);
+  const hasPageRange = from !== '' && to !== '';
+  const bothPages = hasPageRange && Number.isInteger(fromPage) && Number.isInteger(toPage);
+  const maxPage = pageCount ?? 0;
+  const pageOutOfRange = bothPages &&
+    (fromPage < 1 || toPage < 1 || fromPage > maxPage || toPage > maxPage);
   const pagesInRange =
-    bothPages && fromPage >= 1 && toPage >= fromPage && toPage <= (pageCount ?? 0);
+    bothPages && !pageOutOfRange && toPage >= fromPage;
   const pageSentencesTotal = pagesInRange
     ? (pageSentences ?? []).slice(fromPage - 1, toPage).reduce((sum, count) => sum + count, 0)
     : 0;
 
   let pageHint = 'Enter the first and last page.';
-  if (from !== '' && to !== '' && !bothPages) {
+  if (hasPageRange && !bothPages) {
     pageHint = 'Pages are whole numbers.';
-  } else if (bothPages && (fromPage < 1 || toPage > (pageCount ?? 0))) {
-    pageHint = `Enter pages 1 to ${pageCount ?? 1}.`;
+  } else if (pageOutOfRange) {
+    pageHint = `Enter pages 1 to ${maxPage}.`;
   } else if (bothPages && toPage < fromPage) {
     pageHint = 'The last page must not come before the first.';
   } else if (pagesInRange && pageSentencesTotal === 0) {
@@ -119,10 +123,12 @@ export default function AudioQueueSheet({
       const first = nodes[0];
       const last = nodes[nodes.length - 1];
       if (!first || !last) return;
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === sheetRef.current)) {
+      const focused = document.activeElement;
+      const focusOutside = !sheetRef.current.contains(focused);
+      if (event.shiftKey && (focused === first || focused === sheetRef.current || focusOutside)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && (focused === last || focusOutside)) {
         event.preventDefault();
         first.focus();
       }
@@ -278,7 +284,7 @@ export default function AudioQueueSheet({
                       <input
                         type="checkbox"
                         className="aq-check"
-                        checked={selected.has(chapter.index)}
+                        checked={chapter.sentences > 0 && selected.has(chapter.index)}
                         disabled={chapter.sentences === 0}
                         onChange={() => toggle(chapter.index)}
                       />

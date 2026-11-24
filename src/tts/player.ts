@@ -656,6 +656,7 @@ export function createPlayer(options: PlayerOptions): Player {
     const stretches = wordsWanted
       ? estimateTimings(spoken, text.length, { weights: await spokenLengths(spoken) })
       : [];
+    if (pausedNow()) await waitWhilePaused(gen);
     if (gen !== generation) throw new AbortPlayback();
     const emitAt = (expandedIndex: number) => {
       let at = stretches[0];
@@ -672,7 +673,7 @@ export function createPlayer(options: PlayerOptions): Player {
       // The native phone voice reports no boundaries; the web one does. Until a
       // boundary arrives, walk the sentence by elapsed time.
       timer = setInterval(() => {
-        if (gen !== generation) return;
+        if (gen !== generation || pausedNow()) return;
         const elapsed = startedAt ? Date.now() - startedAt : 0;
         emitAt((elapsed / expected) * text.length);
       }, 160);
@@ -682,10 +683,14 @@ export function createPlayer(options: PlayerOptions): Player {
     try {
       await engine.speak([{ id: item.id, text }], { voiceId: options.voiceId, rate: options.rate }, {
         onStart: () => {
+          if (gen !== generation) return;
           startedAt = Date.now();
         },
         onWord: (_id, charIndex) => {
-          if (!wordsWanted) return;
+          if (!wordsWanted || gen !== generation || pausedNow()) return;
+          // Real boundaries own the highlight once the voice reports them.
+          // Leaving the estimate running can move it back to an earlier word.
+          stopWords();
           emitAt(charIndex);
         },
         onError: (err) => {

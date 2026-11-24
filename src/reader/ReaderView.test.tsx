@@ -1,3 +1,4 @@
+import { Blob as NodeBlob } from 'node:buffer';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -199,7 +200,7 @@ vi.mock('../tts/neural/prerender', () => ({
 
 vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
   GlobalWorkerOptions: {},
-  getDocument: () => ({ promise: Promise.resolve({ numPages: 1 }), destroy: () => undefined }),
+  getDocument: () => ({ promise: Promise.resolve({ numPages: 3 }), destroy: () => undefined }),
 }));
 vi.mock('../import/pdfWorker?worker&url', () => ({ default: 'worker.js' }));
 
@@ -780,6 +781,23 @@ describe('ReaderView reflow', () => {
     expect(saved?.sentenceIds).toEqual(['0-0-0', '0-0-1']);
   });
 
+  it('bookmarks the selected sentence when the reading cursor is elsewhere', async () => {
+    await db.books.put(makeBook());
+    await renderReader();
+    await waitFor(() => sentence('0-0-1') !== null, 'second sentence');
+    await longPress('0-0-1');
+
+    const bookmark = buttonByText('Bookmark');
+    expect(bookmark).not.toBeNull();
+    await act(async () => bookmark?.click());
+
+    await waitFor(async () => (await db.bookmarks.count()) === 1, 'bookmark saved');
+    expect(await db.bookmarks.toCollection().first()).toMatchObject({
+      chapterId: 'ch-0',
+      sentenceId: '0-0-1',
+    });
+  });
+
   it('creates a highlight from a long-press selection', async () => {
     await db.books.put(makeBook());
     await renderReader();
@@ -860,7 +878,8 @@ function makeListBook(texts: string[]): BookRecord {
 }
 
 function presentPdfFile(): Blob {
-  return { size: 4, type: 'application/pdf' } as unknown as Blob;
+  // Unlike jsdom's Blob, this keeps its bytes through fake-indexeddb's clone.
+  return new NodeBlob(['%PDF'], { type: 'application/pdf' }) as unknown as Blob;
 }
 
 /** A PDF-backed book: three sentences, one per page. */
@@ -1162,6 +1181,50 @@ describe('reader: generation status, skips and word highlight', () => {
     expect(playerMock.calls[0]?.items.map((item) => item.id)).toEqual(['0-0-0', '0-0-1']);
   });
 
+  it.each([false, true])('continues forward from a skipped block (silent chapter: %s)', async (silent) => {
+    const book = makeBook({ lastPos: { chapterId: 'ch-0', sentenceId: '0-1-0' } });
+    const chapter = book.parsed.chapters[0]!;
+    if (silent) chapter.blocks = [];
+    chapter.blocks.push({
+      id: 'b-0-1',
+      kind: 'table',
+      sentences: [{ id: '0-1-0', text: 'Dose: 5 mg twice daily.' }],
+    });
+    await db.books.put(book);
+    await renderReader();
+    await waitForEngine();
+    await waitFor(() => readingId() === '0-1-0', 'skipped position restored');
+    expect(playButton()?.disabled).toBe(false);
+
+    await act(async () => {
+      playButton()?.click();
+    });
+    await waitFor(() => playerMock.calls.length === 1, 'player created');
+    expect(playerMock.calls[0]?.items[0]?.id).toBe('1-0-0');
+    expect(readingId()).toBe('1-0-0');
+  });
+
+  it('steps in both directions past long skipped blocks and empty chapters', async () => {
+    const book = makeBook({ lastPos: { chapterId: 'ch-0', sentenceId: '0-0-1' } });
+    book.parsed.chapters[0]!.blocks.push({
+      id: 'b-0-1',
+      kind: 'table',
+      sentences: Array.from({ length: 205 }, (_, at) => ({ id: `0-1-${at}`, text: 'Dose: 5 mg.' })),
+    });
+    book.parsed.chapters.splice(1, 0, { id: 'empty', title: 'Empty', blocks: [] });
+    await db.books.put(book);
+    await renderReader();
+    await waitFor(() => readingId() === '0-0-1', 'initial position restored');
+    await act(async () => {
+      buttonByLabel('Next sentence')?.click();
+    });
+    expect(readingId()).toBe('1-0-0');
+    await act(async () => {
+      buttonByLabel('Previous sentence')?.click();
+    });
+    expect(readingId()).toBe('0-0-1');
+  });
+
   it('speaks a sentence without its citation but keeps the original text (F2)', async () => {
     await db.books.put(makeListBook(['Used for pain [12].']));
     await renderReader();
@@ -1215,6 +1278,21 @@ describe('reader: generation status, skips and word highlight', () => {
 });
 
 describe('reader: playing a selection', () => {
+  it('keeps the selection in its chapter when the last sentence is picked', async () => {
+    await db.books.put(makeBook());
+    await renderReader();
+    await waitForEngine();
+    await longPress('0-0-1');
+
+    const extend = buttonByLabel('Extend selection by one sentence');
+    expect(extend?.disabled).toBe(true);
+    expect(container.querySelector('[aria-label="Actions for 1 selected sentence"]')).not.toBeNull();
+
+    await act(async () => buttonByLabel('Play selection')?.click());
+    await waitFor(() => playerMock.calls.length === 1, 'player created');
+    expect(playerMock.calls[0]?.items.map((item) => item.id)).toEqual(['0-0-1']);
+  });
+
   async function pick(ids: string[]): Promise<void> {
     await longPress(ids[0]!);
     await waitFor(() => container.querySelector('[role="dialog"]') !== null, 'selection actions');
@@ -1259,6 +1337,41 @@ describe('reader: playing a selection', () => {
       playerMock.calls[0]?.onSentence?.('0-0-1', 1);
     });
     expect(container.textContent).toContain('Selection: sentence 2 of 2');
+  });
+
+  it.each([false, true])('keeps the selected passage when speed changes (paused: %s)', async (paused) => {
+    await db.books.put(makeListBook(['One.', 'Two.', 'Three.']));
+    await renderReader();
+    await waitForEngine();
+    await pick(['0-0-1']);
+
+    await act(async () => {
+      buttonByLabel('Play selection')?.click();
+    });
+    await waitFor(() => playerMock.calls.length === 1, 'player created');
+    if (paused) {
+      await act(async () => {
+        buttonByLabel('Pause')?.click();
+      });
+    }
+
+    const slider = container.querySelector<HTMLInputElement>('input[aria-label="Playback speed"]');
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      setValue?.call(slider, '1.5');
+      slider?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    if (paused) {
+      expect(playerMock.calls).toHaveLength(1);
+      expect(container.textContent).toContain('Selection: sentence 1 of 1');
+      await act(async () => {
+        buttonByLabel('Resume')?.click();
+      });
+    }
+    await waitFor(() => playerMock.calls.length === 2, 'selection restarted at the new speed');
+    expect(playerMock.calls[1]?.rate).toBe(1.5);
+    expect(playerMock.calls[1]?.items.map((item) => item.id)).toEqual(['0-0-1']);
+    expect(container.textContent).toContain('Selection: sentence 1 of 1');
   });
 
   it('stops at the end and offers continue and replay', async () => {
@@ -1322,6 +1435,28 @@ describe('reader: playing a selection', () => {
     await waitFor(() => playerMock.calls.length === 2, 'chapter playback resumed');
     expect(playerMock.calls[1]?.items.map((item) => item.id)).toEqual(['0-0-0', '0-0-1', '0-0-2']);
     expect(playerMock.calls[1]?.startIndex).toBe(1);
+    expect(container.textContent).not.toContain('Selection finished');
+  });
+
+  it('does not replay the final sentence when continuing a finished selection', async () => {
+    await db.books.put(makeListBook(['One.', 'Two.', 'Three.']));
+    await renderReader();
+    await waitForEngine();
+    await pick(['0-0-2']);
+
+    await act(async () => {
+      buttonByLabel('Play selection')?.click();
+    });
+    await waitFor(() => playerMock.calls.length === 1, 'player created');
+    await act(async () => {
+      playerMock.calls[0]?.onDone?.();
+    });
+    await act(async () => {
+      buttonByText('Continue from here')?.click();
+    });
+
+    expect(playerMock.calls).toHaveLength(1);
+    expect(playButton()?.getAttribute('aria-label')).toBe('Play');
     expect(container.textContent).not.toContain('Selection finished');
   });
 
@@ -1720,6 +1855,31 @@ describe('reader: full-screen reading', () => {
 });
 
 describe('reader: fixes around leaving, chapter jumps and paused stepping', () => {
+  it('closes the contents after a chapter jump and returns focus to its opener', async () => {
+    await db.books.put(makeBook());
+    await renderReader();
+    await waitFor(() => sentence('0-0-0') !== null, 'first chapter visible');
+
+    const contents = buttonByLabel('Contents');
+    contents?.focus();
+    await act(async () => contents?.click());
+    expect(contents?.getAttribute('aria-expanded')).toBe('true');
+
+    const notesTab = container.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1];
+    await act(async () => {
+      notesTab?.focus();
+      notesTab?.click();
+    });
+    expect(document.activeElement).toBe(notesTab);
+    await act(async () => container.querySelector<HTMLButtonElement>('[role="tab"]')?.click());
+    await act(async () => buttonByText('Dynamics')?.click());
+
+    expect(container.querySelector('[aria-label="Chapters and notes"]')).toBeNull();
+    expect(contents?.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(contents);
+    expect(readingId()).toBe('1-0-0');
+  });
+
   it('saves a move made just before the reader closes, in both places', async () => {
     await db.books.put(makeBook());
     await renderReader();
@@ -1924,6 +2084,23 @@ describe('reader: the read-along mark and the PDF default view', () => {
       buttonByLabel('Text size and spacing')?.click();
     });
     await waitFor(() => typeSheet() !== null, 'type sheet on a drawn page');
+  });
+
+  it('keeps a scanned page visible between pages with readable text', async () => {
+    const pdf = makePdfBook();
+    pdf.parsed.chapters[0]!.blocks[0]!.sentences = pdf.parsed.chapters[0]!.blocks[0]!.sentences
+      .filter((entry) => entry.id !== '0-0-1');
+    await db.books.put(pdf);
+    await renderReader();
+    const pageCount = () => container.querySelector('.rd-pdf-count')?.textContent;
+    await waitFor(() => pageCount() === '1 / 3', 'PDF page count');
+
+    const nextPage = container.querySelector<HTMLButtonElement>('.rd-pdf-nav [aria-label="Next page"]');
+    expect(nextPage).not.toBeNull();
+    await act(async () => nextPage?.click());
+    await waitFor(() => pageCount() === '2 / 3', 'scanned page');
+    await act(async () => nextPage?.click());
+    await waitFor(() => pageCount() === '3 / 3', 'next readable page');
   });
 
   it('remembers a switch to the text view for that PDF', async () => {

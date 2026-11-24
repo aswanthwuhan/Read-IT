@@ -2,7 +2,7 @@ import mammoth from 'mammoth';
 import type { ParsedDoc } from '../core/types';
 import { parseHtmlDocument } from './html';
 import { DOCX_IMPORT_MAX_BYTES, EPUB_TEXT_MAX_BYTES } from './limits';
-import { assertEntries, MAX_ZIP_ENTRIES, type ZipEntryInfo } from './zipLimits';
+import { assertEntries, MAX_ZIP_ENTRIES, verifyZipOutput, type ZipEntryInfo } from './zipLimits';
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_HEADER_SIGNATURE = 0x02014b50;
@@ -87,6 +87,7 @@ export async function parseDocx(data: ArrayBuffer, fallbackTitle: string): Promi
     throw new Error('This document is too large to import.');
   }
   assertSafeUncompressedSize(data);
+  verifyZipOutput(data);
   // The browser build of mammoth reads `arrayBuffer`; its Node build reads `buffer`
   // and throws "Could not find file in options" otherwise (tests run in Node).
   const input =

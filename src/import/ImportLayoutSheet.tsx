@@ -62,22 +62,21 @@ export default function ImportLayoutSheet({ count, modelReady, onAnswer, onCance
       const focusable = [
         ...sheet.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'),
       ];
-      if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       const current = document.activeElement;
       // During the download every control is disabled, so `focusable` is empty
       // and focus has dropped to <body>. Keep it inside the sheet rather than
       // letting Tab wander into the Library behind the modal.
-      if (!sheet.contains(current)) {
+      if (focusable.length === 0 || !sheet.contains(current)) {
         event.preventDefault();
         (focusable[0] ?? sheet).focus();
         return;
       }
-      if (event.shiftKey && (current === first || !sheet.contains(current))) {
+      if (event.shiftKey && (current === first || current === sheet)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && (current === last || !sheet.contains(current))) {
+      } else if (!event.shiftKey && (current === last || current === sheet)) {
         event.preventDefault();
         first.focus();
       }
@@ -97,6 +96,10 @@ export default function ImportLayoutSheet({ count, modelReady, onAnswer, onCance
       if (returnTo && document.contains(returnTo)) returnTo.focus();
     };
   }, []);
+
+  useEffect(() => {
+    if (busy) sheetRef.current?.focus();
+  }, [busy]);
 
   async function choose(choice: 'textbook' | 'simple'): Promise<void> {
     if (busy) return;
@@ -129,6 +132,7 @@ export default function ImportLayoutSheet({ count, modelReady, onAnswer, onCance
         ref={sheetRef}
         className="sheet import-sheet"
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descId}

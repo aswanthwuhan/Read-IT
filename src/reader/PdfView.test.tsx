@@ -158,6 +158,36 @@ describe('PdfView', () => {
     expect(parseFloat(rect?.style.width ?? '')).toBeCloseTo(60);
   });
 
+  it('clears the render error after a later render succeeds', async () => {
+    pdf.page.render.mockImplementationOnce(() => ({
+      promise: Promise.reject(new Error('Transient render error')),
+      cancel: pdf.cancel,
+    }));
+    await renderView();
+    await waitFor(() => Boolean(container.querySelector('[role="alert"]')), 'render error');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Transient render error');
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[aria-label="Zoom out"]')?.click();
+    });
+    await waitFor(() => !container.querySelector('[role="alert"]'), 'successful retry');
+    expect(pdf.page.render).toHaveBeenCalledTimes(2);
+  });
+
+  it('disables page and zoom controls if the document cannot load', async () => {
+    pdf.getDocument.mockImplementationOnce(() => ({
+      promise: Promise.reject(new Error('Could not load this PDF')),
+      destroy: pdf.destroy,
+    }));
+    await renderView();
+    await waitFor(() => Boolean(container.querySelector('[role="alert"]')), 'document load error');
+
+    expect(container.querySelector('.rd-pdf-count')?.textContent).toBe('Unavailable');
+    for (const label of ['Previous page', 'Next page', 'Zoom in', 'Zoom out', 'Fit width', 'Fit page']) {
+      expect(container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)?.disabled).toBe(true);
+    }
+  });
+
   it('releases the canvas bitmap and the document when unmounted', async () => {
     await renderView();
     await waitFor(() => canvas().width === 600, 'first paint');

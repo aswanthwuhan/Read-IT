@@ -1,6 +1,6 @@
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../core/db';
 import { getSetting } from '../core/settings';
@@ -118,17 +118,31 @@ async function arrived(step: number): Promise<void> {
   await waitFor(() => (title() === NO_BOOK_TITLES[step] ? true : null), `step ${step + 1}`);
 }
 
-async function start(targets: Target[] = DEFAULT_TARGETS): Promise<void> {
+function TutorialHarness() {
+  const { pathname, search, hash } = useLocation();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <output data-route>{pathname + search + hash}</output>
+      <button data-history-back onClick={() => navigate(-1)}>Browser Back</button>
+      {open && (
+        <Tutorial onClose={() => {
+          closed += 1;
+          setOpen(false);
+        }} />
+      )}
+    </>
+  );
+}
+
+async function start(targets: Target[] = DEFAULT_TARGETS, route = '/'): Promise<void> {
   addTargets(targets);
   await act(async () => {
     root = createRoot(container);
     root.render(
-      <MemoryRouter initialEntries={['/']}>
-        <Tutorial
-          onClose={() => {
-            closed += 1;
-          }}
-        />
+      <MemoryRouter initialEntries={['/previous', route]}>
+        <TutorialHarness />
       </MemoryRouter>,
     );
   });
@@ -160,6 +174,29 @@ afterEach(async () => {
 });
 
 describe('Tutorial', () => {
+  it('returns to the route, query and section that opened the tour', async () => {
+    const original = '/settings?from=library#about';
+    await start(DEFAULT_TARGETS, original);
+    await arrived(0);
+    expect(container.querySelector('[data-route]')?.textContent).toBe('/');
+
+    await click('Skip');
+
+    expect(container.querySelector('[data-route]')?.textContent).toBe(original);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-history-back]')?.click());
+    expect(container.querySelector('[data-route]')?.textContent).toBe('/previous');
+  });
+
+  it('dismisses the tour when the browser goes back during a step', async () => {
+    await start(DEFAULT_TARGETS, '/settings#about');
+    await arrived(0);
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-history-back]')?.click());
+
+    expect(card()).toBeNull();
+    expect(container.querySelector('[data-route]')?.textContent).toBe('/previous');
+  });
+
   it('lights the real control and explains it', async () => {
     await start();
 

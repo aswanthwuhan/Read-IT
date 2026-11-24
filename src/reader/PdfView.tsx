@@ -317,7 +317,7 @@ export default function PdfView({
         element.width = Math.floor(viewport.width * ratio);
         element.height = Math.floor(viewport.height * ratio);
         const context = element.getContext('2d');
-        if (!context) return;
+        if (!context) throw new Error('The PDF page could not open a drawing surface.');
         const task = pdfPage.render({
           canvas: element,
           canvasContext: context,
@@ -327,6 +327,7 @@ export default function PdfView({
         renderTask.current = task;
         await task.promise;
         if (cancelled) return;
+        setError(null);
 
         // Only one page's operator list is worth keeping on a phone.
         const last = shownPage.current;
@@ -477,19 +478,19 @@ export default function PdfView({
             className="btn btn-ghost btn-icon"
             aria-label="Previous page"
             onClick={() => onPageChange(painted - 1)}
-            disabled={painted <= 1}
+            disabled={pageCount === 0 || painted <= 1}
           >
             <Glyph>{icons.back}</Glyph>
           </button>
           <span className="rd-pdf-count" aria-live="polite">
-            {loading ? '…' : `${painted} / ${pageCount || '?'}`}
+            {loading ? 'Loading…' : pageCount > 0 ? `${painted} / ${pageCount}` : 'Unavailable'}
           </span>
           <button
             type="button"
             className="btn btn-ghost btn-icon"
             aria-label="Next page"
             onClick={() => onPageChange(painted + 1)}
-            disabled={pageCount > 0 && painted >= pageCount}
+            disabled={pageCount === 0 || painted >= pageCount}
           >
             <Glyph>{icons.forward}</Glyph>
           </button>
@@ -502,7 +503,7 @@ export default function PdfView({
           onClick={() => setLayout((value) => !value)}
           // Nothing to show on a page without blocks, but a toggle that is
           // already on has to stay tappable or it can never be turned off.
-          disabled={!onSaveOrder || (!layout && layoutBlocks.length === 0)}
+          disabled={pageCount === 0 || !onSaveOrder || (!layout && layoutBlocks.length === 0)}
         >
           Layout
         </button>
@@ -511,6 +512,7 @@ export default function PdfView({
             type="button"
             className="btn btn-ghost btn-icon"
             aria-label="Zoom out"
+            disabled={pageCount === 0 || zoom <= ZOOM_MIN}
             onClick={() => setZoom((value) => clampNumber(value - 0.2, ZOOM_MIN, ZOOM_MAX))}
           >
             <Glyph>{icons.zoomOut}</Glyph>
@@ -519,6 +521,7 @@ export default function PdfView({
             type="button"
             className="btn btn-ghost btn-icon"
             aria-label="Zoom in"
+            disabled={pageCount === 0 || zoom >= ZOOM_MAX}
             onClick={() => setZoom((value) => clampNumber(value + 0.2, ZOOM_MIN, ZOOM_MAX))}
           >
             <Glyph>{icons.zoomIn}</Glyph>
@@ -528,6 +531,7 @@ export default function PdfView({
             className="btn btn-ghost btn-icon"
             aria-label="Fit width"
             title="Fit width"
+            disabled={pageCount === 0}
             aria-pressed={appliedFit === 'width'}
             onClick={() => {
               setFit('width');
@@ -541,6 +545,7 @@ export default function PdfView({
             className="btn btn-ghost btn-icon"
             aria-label="Fit page"
             title="Fit page"
+            disabled={pageCount === 0}
             aria-pressed={appliedFit === 'page'}
             onClick={() => {
               setFit('page');

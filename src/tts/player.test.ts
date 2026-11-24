@@ -1139,6 +1139,43 @@ describe('word highlighting', () => {
     player.stop();
   });
 
+  it('ignores word callbacks from a sentence superseded by a seek', async () => {
+    const engine = new FakeEngine(false);
+    const marks: string[] = [];
+    const player = createPlayer({
+      ...baseOptions,
+      engine,
+      onWord: (id) => marks.push(id),
+    });
+    player.play();
+    await until(() => engine.spoken.length === 1);
+    const staleEvents = engine.currentEvents!;
+    player.seek(1);
+    await until(() => engine.spoken.length === 2);
+    staleEvents.onWord?.('s1', 0);
+    expect(marks).not.toContain('s1');
+    player.stop();
+    engine.releaseAll();
+  });
+
+  it('keeps real voice boundaries instead of overwriting them with estimated timing', async () => {
+    const engine = new FakeEngine(false);
+    const marks: number[] = [];
+    const player = createPlayer({
+      ...baseOptions,
+      engine,
+      items: [{ id: 'x', text: 'Alpha beta gamma delta epsilon zeta.' }],
+      onWord: (_id, at) => marks.push(at),
+    });
+    player.play();
+    await until(() => engine.spoken.length === 1);
+    engine.boundary(17);
+    await delay(200);
+    expect(marks).toEqual([17]);
+    player.stop();
+    engine.releaseAll();
+  });
+
   it('follows boundary events from the web voice', async () => {
     const engine = new FakeEngine(false);
     const words: number[] = [];

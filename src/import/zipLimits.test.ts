@@ -6,8 +6,26 @@ import {
   assertEntries,
   MAX_ZIP_ENTRIES,
   MAX_ZIP_TOTAL_BYTES,
+  verifyZipOutput,
   type ZipEntryInfo,
 } from './zipLimits';
+
+describe('verifyZipOutput', () => {
+  it('accepts normal stored and compressed files, including a streamed multi-chunk entry', () => {
+    const content = new Uint8Array(40_000);
+    crypto.getRandomValues(content);
+    const zip = zipSync({
+      mimetype: [strToU8('application/epub+zip'), { level: 0 }],
+      'chapter.txt': content,
+    });
+    expect(() => verifyZipOutput(zip.slice().buffer)).not.toThrow();
+  });
+
+  it('rejects a truncated central directory', () => {
+    const zip = archive({ 'chapter.txt': strToU8('Chapter one') });
+    expect(() => verifyZipOutput(zip.slice(0, -10))).toThrow(/invalid or unsupported ZIP/);
+  });
+});
 
 function many(count: number): ZipEntryInfo[] {
   return Array.from({ length: count }, (_, i) => ({ name: `file-${i}.txt` }));

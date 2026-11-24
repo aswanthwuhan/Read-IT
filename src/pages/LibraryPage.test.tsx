@@ -262,6 +262,27 @@ describe('library: continue listening', () => {
   });
 });
 
+describe('library: reading progress', () => {
+  it('shows the saved sentence position as a percentage', async () => {
+    const book = makeBook({ lastPos: { chapterId: 'ch-0', sentenceId: '0-0-0' } });
+    book.parsed.chapters[0].blocks[0].sentences.push({ id: '0-0-1', text: 'Distribution comes next.' });
+    await db.books.put(book);
+    await renderLibrary();
+    await waitFor(() => container.querySelector('.lib-pct') !== null, 'reading percentage');
+    expect(container.querySelector('.lib-pct')?.textContent).toBe('50%');
+  });
+
+  it.each([
+    { chapterId: 'missing-chapter', sentenceId: '0-0-0' },
+    { chapterId: 'ch-0', sentenceId: 'missing-sentence' },
+  ])('does not report completion for a missing saved position: $chapterId / $sentenceId', async (lastPos) => {
+    await db.books.put(makeBook({ lastPos }));
+    await renderLibrary();
+    await waitFor(() => container.querySelector('.lib-open') !== null, 'loaded book');
+    expect(container.querySelector('.lib-pct')).toBeNull();
+  });
+});
+
 describe('library: backup reminder', () => {
   it('reminds when books exist and no export was ever made', async () => {
     await db.books.put(makeBook());
@@ -674,6 +695,21 @@ describe('library: the PDF-kind question', () => {
     return vi.mocked(importFileDetailed).mock.calls.length;
   }
 
+  it('explains sparse PDF text without claiming that the imported book is unreadable', async () => {
+    layout.ready = true;
+    vi.mocked(importFileDetailed).mockResolvedValueOnce({
+      bookId: 'sparse-pdf', warning: 'Looks scanned — OCR not supported yet',
+    });
+    await renderLibrary();
+    await pickFiles(makeFile('Sparse.pdf'));
+    await waitFor(() => questionSheet() !== null, 'PDF question');
+    await answerQuestion('Simple book');
+    await waitFor(() => container.querySelector('.banner-warning') !== null, 'PDF warning');
+    const warning = container.querySelector('.banner-warning')?.textContent ?? '';
+    expect(warning).not.toContain('has no text layer');
+    expect(warning).toContain('Available text can still be read and listened to');
+  });
+
   it('does not ask when no PDF is picked', async () => {
     await renderLibrary();
     await pickFiles(makeFile('notes.txt', 'text/plain'));
@@ -699,6 +735,25 @@ describe('library: the PDF-kind question', () => {
     await answerQuestion('Textbook or complex pages');
     await waitFor(() => importCalls() === 1, 'import');
     expect(vi.mocked(importFileDetailed).mock.calls[0][2]).toEqual({ pdfLayout: 'auto' });
+    expect(questionSheet()).toBeNull();
+  });
+
+  it('locks the file picker synchronously while checking PDF settings', async () => {
+    layout.ready = true;
+    await renderLibrary();
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error('file input missing');
+    await act(async () => {
+      for (const name of ['first.pdf', 'second.pdf']) {
+        Object.defineProperty(input, 'files', { value: [makeFile(name)], configurable: true });
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await waitFor(() => questionSheet() !== null, 'PDF question');
+    await answerQuestion('Simple book');
+
+    await waitFor(() => importCalls() === 1, 'first import');
+    expect(vi.mocked(importFileDetailed).mock.calls[0][0].name).toBe('first.pdf');
     expect(questionSheet()).toBeNull();
   });
 
@@ -754,6 +809,28 @@ describe('library: the PDF-kind question', () => {
     });
     await waitFor(() => importCalls() === 1, 'import after download');
     expect(vi.mocked(importFileDetailed).mock.calls[0][2]).toEqual({ pdfLayout: 'auto' });
+  });
+
+  it('keeps the fallback warning visible when the layout model cannot download', async () => {
+    await renderLibrary();
+    await pickFiles(makeFile('Katzung.pdf'));
+    await waitFor(() => questionSheet() !== null, 'PDF question');
+    await answerQuestion('Textbook or complex pages');
+
+    const dialog = questionSheet();
+    expect(document.activeElement).toBe(dialog);
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    dialog?.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(dialog);
+
+    await act(async () => {
+      layout.fail?.(new Error('Offline'));
+    });
+    await waitFor(() => container.querySelector('.banner-warning') !== null, 'download warning');
+    expect(importCalls()).toBe(1);
+    expect(container.querySelector('.banner-warning')?.textContent).toContain('Offline');
+    expect(container.querySelector('h1')?.textContent).toBe('Library');
   });
 
   it('remembers the answer and skips the question next time', async () => {

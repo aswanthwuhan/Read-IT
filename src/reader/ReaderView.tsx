@@ -56,7 +56,6 @@ import {
   pageWithSentence,
   posForSaved,
   sentenceAt,
-  stepPos,
   type FlatSentence,
   type Pos,
 } from './sentences';
@@ -183,6 +182,7 @@ export default function ReaderView() {
   const [mode, setMode] = useState<'text' | 'page'>('text');
   const [pdfPage, setPdfPage] = useState(1);
   const [drawer, setDrawer] = useState<'none' | 'toc' | 'notes'>('none');
+  const drawerOpen = drawer !== 'none';
   const [typeOpen, setTypeOpen] = useState(false);
   const [selection, setSelection] = useState<Picked | null>(null);
   /** Non-null from "Play selection" until the passage ends or playback restarts. */
@@ -274,9 +274,9 @@ export default function ReaderView() {
   const planCache = useRef(new Map<string, ChapterPlan>());
   const planCacheKey = useRef('');
   /**
-   * Page view: the reader turned to another page while the voice kept going.
-   * The page then stays put instead of following the voice, and "Play from
-   * here" is offered.
+   * Page view: the displayed page differs from the reading cursor because the
+   * reader browsed while listening or opened a page without a sentence.
+   * "Play from here" can move the cursor to the displayed page or nearby text.
    */
   const [browsing, setBrowsing] = useState(false);
   /** The sleep timer's "End of chapter": stop instead of auto-advancing. */
@@ -786,27 +786,24 @@ export default function ReaderView() {
     let chapterIdx = ci;
     let startAt = at;
     let target: ChapterPlan | null = null;
+    let queueIndex = 0;
     while (chapterIdx < index.chapters.length) {
       const candidate = planFor(chapterIdx);
-      if (candidate && candidate.items.length > 0) {
-        target = candidate;
-        break;
+      if (candidate?.items.length) {
+        const sentences = index.chapters[chapterIdx] ?? [];
+        for (let offset = startAt; offset < sentences.length; offset += 1) {
+          const found = candidate.orderById.get(sentences[offset]!.id);
+          if (found === undefined) continue;
+          target = candidate;
+          queueIndex = found;
+          break;
+        }
+        if (target) break;
       }
       chapterIdx += 1;
       startAt = 0;
     }
     if (!target) return;
-
-    const sentences = index.chapters[chapterIdx] ?? [];
-    let queueIndex = 0;
-    for (let offset = 0; offset < Math.max(1, sentences.length); offset += 1) {
-      const sentence = sentences[Math.min(startAt + offset, sentences.length - 1)];
-      const found = sentence ? target.orderById.get(sentence.id) : undefined;
-      if (found !== undefined) {
-        queueIndex = found;
-        break;
-      }
-    }
 
     setError(null);
     setFailed(null);
@@ -858,12 +855,13 @@ export default function ReaderView() {
    * explicit request, so it wins over the skip switches: a sentence from a
    * skipped table is read here too.
    */
-  function beginSelectionPlayback(info: EngineInfo, ids: string[], ci: number): void {
+  function beginSelectionPlayback(info: EngineInfo, ids: string[], ci: number, startIndex = 0): void {
     if (!book || !index) return;
     const target = book.parsed.chapters[ci];
     if (!target) return;
     const items = planSelection(target, ids, skipRef.current, pauseRef.current);
     if (items.length === 0) return;
+    const queueIndex = Math.min(startIndex, items.length - 1);
 
     releasePlayer();
     const mine = ++generation.current;
@@ -878,7 +876,7 @@ export default function ReaderView() {
     const player = startPlayer(
       info,
       items,
-      0,
+      queueIndex,
       mine,
       (id) => {
         const pos = index.byId.get(id);
@@ -897,23 +895,23 @@ export default function ReaderView() {
     );
     playerRef.current = player;
     setPlayState('playing');
-    setSelectionPlay({ ids: [...ids], chapterIndex: ci, total: items.length, at: 1, done: false });
-    const firstPos = index.byId.get(items[0]!.id);
+    setSelectionPlay({ ids: [...ids], chapterIndex: ci, total: items.length, at: queueIndex + 1, done: false });
+    const firstPos = index.byId.get(items[queueIndex]!.id);
     if (firstPos) setCursor(firstPos);
     player.play();
   }
 
   /** Play picked sentences now if the engine is resolved, else once it is. */
-  function startSelection(ids: string[], ci: number): void {
+  function startSelection(ids: string[], ci: number, startIndex = 0): void {
     const info = engineRef.current;
     if (info) {
-      beginSelectionPlayback(info, ids, ci);
+      beginSelectionPlayback(info, ids, ci, startIndex);
       return;
     }
     const mine = generation.current;
     void engineForPlay().then((loaded) => {
       if (mine !== generation.current) return;
-      beginSelectionPlayback(loaded, ids, ci);
+      beginSelectionPlayback(loaded, ids, ci, startIndex);
     });
   }
 
@@ -932,7 +930,7 @@ export default function ReaderView() {
     if (!picked) return;
     const lastId = picked.ids[picked.ids.length - 1];
     const last = lastId && index ? index.byId.get(lastId) : undefined;
-    const next = last ? (neighbour(last, 1) ?? last) : cursorRef.current;
+    const next = last ? neighbour(last, 1) : null;
     setSelectionPlay(null);
     if (!next) return;
     const info = engineRef.current;
@@ -993,6 +991,10 @@ export default function ReaderView() {
       setPlayState('playing');
       return;
     }
+    if (playStateRef.current === 'paused' && selectionPlay && !selectionPlay.done) {
+      startSelection(selectionPlay.ids, selectionPlay.chapterIndex, selectionPlay.at - 1);
+      return;
+    }
     // B2: after scrolling away from the cursor, Play starts at the top of what
     // is on screen rather than at a sentence she can no longer see.
     const fromTop =
@@ -1039,16 +1041,18 @@ export default function ReaderView() {
   /** Next sentence that is actually read aloud: skipped blocks are stepped over. */
   function neighbour(pos: Pos, delta: 1 | -1): Pos | null {
     if (!index) return null;
-    let at = pos;
-    const plans = new Map<number, ChapterPlan | null>();
-    for (let guard = 0; guard < 200; guard += 1) {
-      const next = stepPos(index, at, delta);
-      if (!next) return null;
-      const sentence = sentenceAt(index, next);
-      if (!sentence) return null;
-      if (!plans.has(next.chapterIndex)) plans.set(next.chapterIndex, planFor(next.chapterIndex));
-      if (plans.get(next.chapterIndex)?.orderById.has(sentence.id)) return next;
-      at = next;
+    for (
+      let ci = pos.chapterIndex;
+      ci >= 0 && ci < index.chapters.length;
+      ci += delta
+    ) {
+      const sentences = index.chapters[ci]!;
+      const order = planFor(ci)?.orderById;
+      if (!order?.size) continue;
+      const start = ci === pos.chapterIndex ? pos.index + delta : delta === 1 ? 0 : sentences.length - 1;
+      for (let at = start; at >= 0 && at < sentences.length; at += delta) {
+        if (order.has(sentences[at]!.id)) return { chapterIndex: ci, index: at };
+      }
     }
     return null;
   }
@@ -1092,8 +1096,12 @@ export default function ReaderView() {
   function goToPage(page: number): void {
     if (!index || page < 1) return;
     setPdfPage(page);
-    const pos = pageStart(page);
+    // A scanned or blank page still needs to stay visible. Moving the reading
+    // cursor to a neighbouring sentence would turn the displayed page back.
+    const pos = pages.get(page);
+    setBrowsing(!pos);
     if (pos) goToPos(pos);
+    else if (playStateRef.current === 'paused') releasePlayer();
   }
 
   /**
@@ -1165,21 +1173,41 @@ export default function ReaderView() {
   function changeRate(next: number): void {
     rateRef.current = next;
     void setSetting(RATE_KEY, next);
+    if (rateTimer.current !== null) {
+      window.clearTimeout(rateTimer.current);
+      rateTimer.current = null;
+    }
+    const player = playerRef.current;
+    const picked = selectionPlay && !selectionPlay.done ? selectionPlay : null;
+    function discardPausedPlayer(): void {
+      releasePlayer();
+      if (picked) {
+        setSelectionPlay({ ...picked, at: player ? player.index + 1 : picked.at });
+        setPlayState('paused');
+      }
+    }
     // The player's rate is fixed at creation. A paused clip would ignore the
     // new rate on resume, so drop it and let Play start fresh with this rate.
     if (playStateRef.current === 'paused') {
-      releasePlayer();
+      discardPausedPlayer();
       return;
     }
     // A slider drag fires many updates; restart once it settles.
-    if (rateTimer.current !== null) window.clearTimeout(rateTimer.current);
     if (playStateRef.current !== 'playing') return;
     rateTimer.current = window.setTimeout(() => {
       rateTimer.current = null;
       const info = engineRef.current;
       const pos = cursorRef.current;
-      if (!info || !pos || playStateRef.current !== 'playing') return;
-      beginPlayback(info, pos.chapterIndex, pos.index);
+      if (!info || !pos || !player || playerRef.current !== player) return;
+      if (playStateRef.current === 'paused') {
+        discardPausedPlayer();
+      } else if (playStateRef.current === 'playing') {
+        if (picked) {
+          beginSelectionPlayback(info, picked.ids, picked.chapterIndex, player.index);
+        } else {
+          beginPlayback(info, pos.chapterIndex, pos.index);
+        }
+      }
     }, RATE_RESTART_MS);
   }
 
@@ -1437,18 +1465,19 @@ export default function ReaderView() {
     }
   }, [selection]);
 
-  /** Grow a long-press selection one sentence further. */
+  // A passage is played within one chapter, which is also all the reflow view
+  // can display. Keep the selection and its actions within that same chapter.
+  const lastSelectedId = selection?.ids.at(-1);
+  const lastSelectedPos = lastSelectedId ? index?.byId.get(lastSelectedId) : undefined;
+  const nextSelectedSentence = lastSelectedPos
+    ? index?.chapters[lastSelectedPos.chapterIndex]?.[lastSelectedPos.index + 1]
+    : undefined;
+
   function extendSelection(): void {
-    if (!selection || !index) return;
-    const last = selection.ids[selection.ids.length - 1];
-    const pos = last ? index.byId.get(last) : undefined;
-    if (!pos) return;
-    const next = stepPos(index, pos, 1);
-    const sentence = sentenceAt(index, next);
-    if (!sentence || selection.ids.includes(sentence.id)) return;
+    if (!selection || !nextSelectedSentence) return;
     setSelection({
-      ids: [...selection.ids, sentence.id],
-      text: `${selection.text} ${sentence.text}`.trim(),
+      ids: [...selection.ids, nextSelectedSentence.id],
+      text: `${selection.text} ${nextSelectedSentence.text}`.trim(),
     });
   }
 
@@ -1474,19 +1503,25 @@ export default function ReaderView() {
       clearSelection();
       return highlight;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (note === undefined) setError(err instanceof Error ? err.message : String(err));
       return null;
     }
   }
 
   async function bookmarkHere(): Promise<void> {
-    if (!book || !reading || !chapter) return;
+    const sentenceId = selection?.ids[0];
+    if (!book || !index || !sentenceId) return;
+    const position = index.byId.get(sentenceId);
+    if (!position) return;
+    const sentence = sentenceAt(index, position);
+    const selectedChapter = book.parsed.chapters[position.chapterIndex];
+    if (!sentence || !selectedChapter) return;
     try {
       await addBookmark({
         bookId: book.id,
-        chapterId: chapter.id,
-        sentenceId: reading.id,
-        label: reading.text.slice(0, 80),
+        chapterId: selectedChapter.id,
+        sentenceId: sentence.id,
+        label: sentence.text.slice(0, 80),
       });
       clearSelection();
     } catch (err) {
@@ -1622,8 +1657,7 @@ export default function ReaderView() {
   // -- sheets: Escape + focus ----------------------------------------------
 
   useEffect(() => {
-    const open = drawer !== 'none' || typeOpen;
-    if (!open) return;
+    if (!drawerOpen && !typeOpen) return;
     const opener = document.activeElement as HTMLElement | null;
     sheetBody.current?.focus();
     const onKey = (event: KeyboardEvent) => {
@@ -1637,7 +1671,7 @@ export default function ReaderView() {
       if (event.key !== 'Tab') return;
       const body = sheetBody.current;
       if (!body) return;
-      const focusable = [...body.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])')];
+      const focusable = [...body.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])')];
       if (focusable.length === 0) return;
       const first = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
@@ -1658,9 +1692,9 @@ export default function ReaderView() {
     return () => {
       window.removeEventListener('keydown', onKey);
       // Closing a sheet returns the reader to the control that opened it.
-      opener?.focus?.();
+      opener?.focus?.({ preventScroll: true });
     };
-  }, [drawer, typeOpen]);
+  }, [drawerOpen, typeOpen]);
 
   // -- unmount / app hidden ------------------------------------------------
 
@@ -1810,7 +1844,7 @@ export default function ReaderView() {
             type="button"
             className="rd-bar-btn"
             aria-label="Contents"
-            aria-expanded={drawer !== 'none'}
+            aria-expanded={drawerOpen}
             data-tour="contents"
             onClick={() => {
               setTypeOpen(false);
@@ -1989,6 +2023,10 @@ export default function ReaderView() {
           generating={generatingNumber}
           readyAhead={readyAhead}
           sentenceSpokenTotal={plan?.items.length ?? 0}
+          canStartPlayback={Boolean(
+            plan?.items.length ||
+              index.chapters.some((_, ci) => ci > chapterIndex && Boolean(planFor(ci)?.items.length))
+          )}
           pages={showPage ? null : pageNav}
           fromHere={showPage ? browsing : mode === 'text' && !cursorOnScreen && playState !== 'playing'}
           selection={
@@ -2037,9 +2075,10 @@ export default function ReaderView() {
         <SelectionBar
           text={selection.text}
           count={selection.ids.length}
+          canExtend={Boolean(nextSelectedSentence)}
           onPlay={playSelection}
           onHighlight={(color) => void highlightSelection(color)}
-          onNote={(note) => void highlightSelection('yellow', note)}
+          onNote={async (note) => Boolean(await highlightSelection('yellow', note))}
           onBookmark={() => void bookmarkHere()}
           onExtend={extendSelection}
           onClose={clearSelection}
@@ -2117,7 +2156,7 @@ export default function ReaderView() {
           className="rd-sheet"
           role="dialog"
           aria-modal="true"
-              aria-label="Chapters and notes"
+          aria-label="Chapters and notes"
           onClick={(event) => {
             if (event.target === event.currentTarget) setDrawer('none');
           }}
@@ -2158,7 +2197,10 @@ export default function ReaderView() {
                     <button
                       type="button"
                       className={i === chapterIndex ? 'rd-toc-link active' : 'rd-toc-link'}
-                      onClick={() => goToChapter(i)}
+                      onClick={() => {
+                        goToChapter(i);
+                        setDrawer('none');
+                      }}
                     >
                       {entry.title}
                     </button>

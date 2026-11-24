@@ -101,6 +101,7 @@ export default function LayoutModelPanel() {
   const download = useDownload(LAYOUT_DOWNLOAD_ID);
   const [available, setAvailable] = useState<Availability>('loading');
   const [failure, setFailure] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [measuring, setMeasuring] = useState(false);
   const [measureError, setMeasureError] = useState<string | null>(null);
   const [pdfs, setPdfs] = useState<PdfBook[]>([]);
@@ -148,6 +149,7 @@ export default function LayoutModelPanel() {
   }, []);
 
   const remove = useCallback(async () => {
+    setRemoving(true);
     try {
       await deleteLayoutModel();
       setFailure(null);
@@ -158,6 +160,8 @@ export default function LayoutModelPanel() {
       await setSetting(SPEED_KEY, 0);
     } catch (error) {
       if (alive.current) setFailure(messageOf(error));
+    } finally {
+      if (alive.current) setRemoving(false);
     }
   }, []);
 
@@ -188,6 +192,8 @@ export default function LayoutModelPanel() {
   }, [download.status, measure]);
 
   const state = panelState(download, available, failure);
+  const busy = state.kind === 'downloading' || removing || measuring
+    || bookRun.kind === 'running' || reanalyse.kind === 'running';
 
   // What an import would do right now; a book read any other way is out of date.
   const wanted: BookRecord['layout'] = state.kind === 'ready' && mode === 'auto' ? 'model' : 'heuristic';
@@ -236,10 +242,15 @@ export default function LayoutModelPanel() {
       }
     }
 
-    const after = await listPdfs();
-    if (!alive.current) return;
-    setPdfs(after);
-    setReanalyse({ kind: 'done', summary: describeRun(books.length, modelBooks, failed, totals) });
+    try {
+      const after = await listPdfs();
+      if (alive.current) setPdfs(after);
+    } catch {
+      // The books were already written. Keep their results visible even if
+      // IndexedDB cannot refresh the picker.
+    } finally {
+      if (alive.current) setReanalyse({ kind: 'done', summary: describeRun(books.length, modelBooks, failed, totals) });
+    }
   };
 
   /**
@@ -279,7 +290,6 @@ export default function LayoutModelPanel() {
   }
 
   const chip = chipFor(state);
-  const busy = state.kind === 'downloading' || measuring;
   const speedLine = describeSpeed(speed);
   const blocked = bookBlockedReason(state, mode);
 
@@ -298,7 +308,7 @@ export default function LayoutModelPanel() {
             )}
             {(state.kind === 'ready' || state.kind === 'error') && (
               <button type="button" className="btn btn-ghost" onClick={() => void remove()} disabled={busy}>
-                Delete
+                {removing ? 'Deleting…' : 'Delete'}
               </button>
             )}
           </div>
@@ -343,6 +353,7 @@ export default function LayoutModelPanel() {
           <select
             className="input"
             value={mode}
+            disabled={busy}
             onChange={(event) => void setSetting('import.layout', event.target.value)}
           >
             {LAYOUT_MODES.map((option) => (
@@ -390,7 +401,7 @@ export default function LayoutModelPanel() {
               setBookRun({ kind: 'idle' });
               setBookError(null);
             }}
-            disabled={pdfs.length === 0 || bookRun.kind === 'running'}
+            disabled={pdfs.length === 0 || busy}
           >
             <option value="">{pdfs.length === 0 ? 'No PDFs in the library yet' : 'Choose a PDF'}</option>
             {pdfs.map((book) => (
@@ -411,7 +422,7 @@ export default function LayoutModelPanel() {
             type="button"
             className="btn btn-secondary"
             onClick={() => void runBook()}
-            disabled={!pickedBook || bookRun.kind === 'running' || blocked !== null}
+            disabled={!pickedBook || busy || blocked !== null}
           >
             {bookRun.kind === 'running' ? 'Reading the book again…' : 'Run layout detection'}
           </button>
@@ -478,7 +489,7 @@ export default function LayoutModelPanel() {
                 type="button"
                 className="btn btn-secondary"
                 onClick={() => void redoBooks()}
-                disabled={pdfs.length === 0 || reanalyse.kind === 'running' || busy}
+                disabled={pdfs.length === 0 || busy}
               >
                 {reanalyse.kind === 'running'
                   ? `Re-analysing ${reanalyse.done + 1} of ${reanalyse.total}`

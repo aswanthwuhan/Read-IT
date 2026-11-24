@@ -73,6 +73,13 @@ export function entryGroup(id: string): 'core' | 'term' {
  */
 const WORD_ENTRY = /^\\b\[([A-Za-z])([A-Za-z])\]([A-Za-z]*)\\b$/;
 
+// User patterns run on the playback thread. Allow fixed-width matches only.
+const USER_REGEX = /^(?:\\b)?[\p{L}\p{N}_ '-]+(?:\\b)?$/u;
+
+function isSafeUserRegex(pattern: string): boolean {
+  return pattern.length <= 2000 && (USER_REGEX.test(pattern) || WORD_ENTRY.test(pattern));
+}
+
 function wordEntryKey(entry: LexiconEntry): string | null {
   if (!entry.isRegex) return null;
   const m = WORD_ENTRY.exec(entry.pattern);
@@ -198,6 +205,7 @@ export function applyEntry(text: string, entry: LexiconEntry): string {
     // Plain substring; split/join so "$&" in a replacement stays literal.
     return text.split(entry.pattern).join(entry.replacement);
   }
+  if (entry.source === 'user' && !isSafeUserRegex(entry.pattern)) return text;
   const re = regexFor(entry.pattern);
   return re ? text.replace(re, entry.replacement) : text;
 }
@@ -291,6 +299,9 @@ export async function saveUserEntry(entry: {
   replacement: string;
   isRegex: boolean;
 }): Promise<LexiconEntry> {
+  if (entry.isRegex && !isSafeUserRegex(entry.pattern)) {
+    throw new Error('Use a fixed-text regex with optional word boundaries, or turn off Regex to match literal text.');
+  }
   const rec: LexiconEntry = {
     id: entry.id ?? newUserEntryId(),
     pattern: entry.pattern,

@@ -5,9 +5,7 @@ const config: CapacitorConfig = {
   appName: 'Read IT',
   webDir: 'dist',
   plugins: {
-    // Article import fetches arbitrary sites; native HTTP avoids the WebView CORS wall.
-    // Off: the global fetch patch base64-encodes bodies over the bridge, which breaks 100+ MB model downloads.
-    // Web-article import calls CapacitorHttp explicitly instead.
+    // Keep WebView CORS and streaming enabled for articles and model downloads.
     CapacitorHttp: { enabled: false },
   },
   android: {

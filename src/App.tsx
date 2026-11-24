@@ -59,6 +59,7 @@ function NavIcon({ name }: { name: string }) {
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
+  const mainRef = useRef<HTMLElement>(null);
   // The back bridge reads the path at press time, not at install time.
   const pathRef = useRef(location.pathname);
   pathRef.current = location.pathname;
@@ -75,6 +76,7 @@ export default function App() {
   // The tutorial greets a fresh install only (empty library, never seen); an
   // upgrade gets "What's new" instead, and Settings → About replays it any time.
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  const tutorialOpenerRef = useRef<HTMLElement | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,7 +111,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const openTour = () => setTutorialOpen(true);
+    const openTour = (event: Event) => {
+      tutorialOpenerRef.current = (event as CustomEvent<HTMLElement | undefined>).detail;
+      setTutorialOpen(true);
+    };
     window.addEventListener(TUTORIAL_START_EVENT, openTour);
     return () => window.removeEventListener(TUTORIAL_START_EVENT, openTour);
   }, []);
@@ -120,11 +125,18 @@ export default function App() {
 
   return (
     <div className={reading ? 'app app--reading' : 'app'}>
-      <a className="skip-link" href="#main">
+      <a
+        className="skip-link"
+        href="#main"
+        onClick={(event) => {
+          event.preventDefault();
+          mainRef.current?.focus();
+        }}
+      >
         Skip to content
       </a>
 
-      <main className="app-main" id="main">
+      <main className="app-main" id="main" ref={mainRef} tabIndex={-1}>
         <Routes>
           <Route path="/" element={<LibraryPage />} />
           <Route path="/read/:bookId" element={<ReaderPage />} />
@@ -168,7 +180,7 @@ export default function App() {
         </nav>
       )}
 
-      {tutorialOpen ? <Tutorial onClose={() => setTutorialOpen(false)} /> : null}
+      {tutorialOpen ? <Tutorial opener={tutorialOpenerRef.current} onClose={() => setTutorialOpen(false)} /> : null}
       {whatsNewVersion ? <WhatsNew version={whatsNewVersion} onClose={() => setWhatsNewVersion(null)} /> : null}
     </div>
   );

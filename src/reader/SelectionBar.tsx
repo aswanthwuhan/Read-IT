@@ -11,9 +11,10 @@ export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink';
 interface Props {
   text: string;
   count: number;
+  canExtend: boolean;
   onPlay(): void;
   onHighlight(color: HighlightColor): void;
-  onNote(note: string): void;
+  onNote(note: string): Promise<boolean>;
   onBookmark(): void;
   onExtend(): void;
   onClose(): void;
@@ -29,6 +30,7 @@ const COLORS: { color: HighlightColor; label: string }[] = [
 export default function SelectionBar({
   text,
   count,
+  canExtend,
   onPlay,
   onHighlight,
   onNote,
@@ -38,7 +40,28 @@ export default function SelectionBar({
 }: Props) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteError, setNoteError] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+
+  async function saveNote(): Promise<void> {
+    const text = note.trim();
+    if (!text || savingNote) return;
+    setSavingNote(true);
+    setNoteError(false);
+    try {
+      if (await onNote(text)) {
+        setNote('');
+        setNoteOpen(false);
+      } else {
+        setNoteError(true);
+      }
+    } catch {
+      setNoteError(true);
+    } finally {
+      setSavingNote(false);
+    }
+  }
 
   // Keyboard and screen-reader users land in the toolbar, not back at the top
   // of the document.
@@ -101,9 +124,7 @@ export default function SelectionBar({
           className="rd-note-form"
           onSubmit={(event) => {
             event.preventDefault();
-            onNote(note.trim());
-            setNote('');
-            setNoteOpen(false);
+            void saveNote();
           }}
         >
           <label htmlFor="rd-note">Note</label>
@@ -112,23 +133,35 @@ export default function SelectionBar({
             className="input rd-note-input"
             value={note}
             rows={3}
+            readOnly={savingNote}
             onChange={(event) => setNote(event.target.value)}
             onKeyDown={(event) => {
               // Escape cancels just the note field, not the whole selection.
               if (event.key !== 'Escape') return;
               event.preventDefault();
               event.stopPropagation();
+              if (savingNote) return;
               setNote('');
+              setNoteError(false);
               setNoteOpen(false);
               box.current?.focus();
             }}
             autoFocus
           />
+          {noteError ? <p className="rd-note-error" role="alert">Could not save the note. Try again.</p> : null}
           <div className="rd-note-actions">
-            <button type="submit" className="btn btn-primary" disabled={!note.trim()}>
-              Save note
+            <button type="submit" className="btn btn-primary" disabled={savingNote || !note.trim()}>
+              {savingNote ? 'Saving note…' : 'Save note'}
             </button>
-            <button type="button" className="btn btn-secondary" onClick={() => setNoteOpen(false)}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={savingNote}
+              onClick={() => {
+                setNoteError(false);
+                setNoteOpen(false);
+              }}
+            >
               Cancel
             </button>
           </div>
@@ -163,6 +196,7 @@ export default function SelectionBar({
               type="button"
               className="btn btn-ghost rd-action"
               aria-label="Extend selection by one sentence"
+              disabled={!canExtend}
               onClick={onExtend}
             >
               <Glyph>{icons.plus}</Glyph><span>Sentence</span>

@@ -357,6 +357,27 @@ describe('LayoutModelPanel', () => {
     expect(button('Run layout detection')?.disabled).toBe(false);
   });
 
+  it('blocks competing layout operations until a re-read finishes', async () => {
+    model.ready = true;
+    await db.books.put(book('pdf-1', 'Katzung', 'pdf', 'heuristic'));
+    await mount();
+    await choose(fieldSelect('Book')!, 'pdf-1');
+
+    await click('Run layout detection');
+    expect(button('Re-analyse 1 PDF')?.disabled).toBe(true);
+    expect(button('Delete')?.disabled).toBe(true);
+    expect(fieldSelect('Layout for new PDFs')?.disabled).toBe(true);
+    await act(async () => run.reject?.(new Error('Re-read interrupted')));
+
+    await click('Re-analyse 1 PDF');
+    expect(button('Run layout detection')?.disabled).toBe(true);
+    expect(button('Measure speed')?.disabled).toBe(true);
+    await act(async () => run.reject?.(new Error('Re-read interrupted')));
+    await waitForText('1 could not be read');
+    expect(button('Run layout detection')?.disabled).toBe(false);
+    expect(run.calls).toEqual(['pdf-1', 'pdf-1']);
+  });
+
   it('shows the answer to the import question and stores a change', async () => {
     await mount();
 

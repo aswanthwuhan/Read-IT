@@ -11,7 +11,7 @@ type Handler<A extends unknown[] = []> = ReturnType<typeof vi.fn<(...args: A) =>
 interface BarProps {
   onPlay: Handler;
   onHighlight: Handler<[HighlightColor]>;
-  onNote: Handler<[string]>;
+  onNote: ReturnType<typeof vi.fn<(note: string) => Promise<boolean>>>;
   onBookmark: Handler;
   onCard: Handler<['qa' | 'cloze']>;
   onAi: Handler;
@@ -23,7 +23,7 @@ function renderBar(overrides: Partial<BarProps> = {}): { container: HTMLDivEleme
   const props: BarProps = {
     onPlay: vi.fn(),
     onHighlight: vi.fn(),
-    onNote: vi.fn(),
+    onNote: vi.fn().mockResolvedValue(true),
     onBookmark: vi.fn(),
     onCard: vi.fn(),
     onAi: vi.fn(),
@@ -35,7 +35,7 @@ function renderBar(overrides: Partial<BarProps> = {}): { container: HTMLDivEleme
   document.body.append(container);
   const root = createRoot(container);
   act(() => {
-    root.render(<SelectionBar text="Absorption is the first step." count={1} {...props} />);
+    root.render(<SelectionBar text="Absorption is the first step." count={1} canExtend {...props} />);
   });
   return { container, root, props };
 }
@@ -74,7 +74,7 @@ describe('SelectionBar', () => {
     act(() => root.unmount());
   });
 
-  it('reports the chosen colour and then the note', () => {
+  it('reports the chosen colour and then the note', async () => {
     const { container, root, props } = renderBar();
 
     act(() => {
@@ -92,12 +92,35 @@ describe('SelectionBar', () => {
       setValue?.call(note, '  remember this  ');
       note?.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    act(() => {
+    await act(async () => {
       container
         .querySelector('form')
         ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
     expect(props.onNote).toHaveBeenCalledWith('remember this');
+    act(() => root.unmount());
+  });
+
+  it('keeps the draft available to retry when the save fails', async () => {
+    const onNote = vi.fn<(note: string) => Promise<boolean>>().mockResolvedValueOnce(false).mockResolvedValue(true);
+    const { container, root } = renderBar({ onNote });
+    act(() => {
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Note')?.click();
+    });
+    const note = container.querySelector<HTMLTextAreaElement>('#rd-note');
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    act(() => {
+      setValue?.call(note, 'Keep this draft');
+      note?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const form = container.querySelector('form');
+    await act(async () => form?.requestSubmit());
+    expect(note?.value).toBe('Keep this draft');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Could not save the note');
+
+    await act(async () => form?.requestSubmit());
+    expect(onNote.mock.calls).toEqual([['Keep this draft'], ['Keep this draft']]);
+    expect(container.querySelector('form')).toBeNull();
     act(() => root.unmount());
   });
 });

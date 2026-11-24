@@ -250,6 +250,15 @@ describe('systemEngine (web)', () => {
     await done;
   });
 
+  it('does not start an utterance when stopped during the browser cancel delay', async () => {
+    synth.speaking = true;
+    const done = systemEngine.speak([{ id: 's1', text: 'Alpha.' }], { rate: 1 }, {});
+    systemEngine.stop();
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(synth.queue).toHaveLength(0);
+    await done;
+  });
+
   it('pauses by cancelling, keeps the call pending, and replays the chunk on resume', async () => {
     const { ev, log } = events();
     const done = systemEngine.speak([{ id: 's1', text: 'Alpha beta.' }], { rate: 1 }, ev);
@@ -287,6 +296,18 @@ describe('systemEngine (web)', () => {
     await until(() => synth.queue.length === 1);
     expect(synth.resumeCalls).toBeGreaterThan(0);
     synth.queue[0]!.onend?.();
+    await done;
+  });
+
+  it('replays the web utterance when resume beats the cancel event', async () => {
+    const done = systemEngine.speak([{ id: 's1', text: 'Alpha.' }], { rate: 1 }, {});
+    await until(() => synth.queue.length === 1);
+    systemEngine.pause();
+    systemEngine.resume();
+    synth.queue[0]!.onerror?.({ error: 'canceled' });
+    await until(() => synth.queue.length === 2);
+    expect(synth.queue[1]?.text).toBe('Alpha.');
+    synth.queue[1]!.onend?.();
     await done;
   });
 
@@ -418,6 +439,18 @@ describe('systemEngine (native)', () => {
     ]);
     expect(outcome).toBe('settled');
     expect(nativeMock.state.stops).toBeGreaterThan(0);
+  });
+
+  it('replays the native sentence when resumed immediately after pausing', async () => {
+    const engine = __systemInternals.nativeEngine;
+    const done = engine.speak([{ id: 's1', text: 'Alpha.' }], { rate: 1 }, {});
+    await until(() => nativeMock.calls.length === 1);
+    engine.pause();
+    engine.resume();
+    await until(() => nativeMock.calls.length === 2);
+    expect(nativeMock.calls[1]?.text).toBe('Alpha.');
+    nativeMock.resolveAll();
+    await done;
   });
 
   it('lists English voices only', async () => {

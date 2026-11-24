@@ -1106,6 +1106,12 @@
   resize: vertical;
 }
 
+.rd-note-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+
 .rd-note-actions {
   display: flex;
   gap: var(--space-2);

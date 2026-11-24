@@ -20,6 +20,7 @@ import {
   markKokoroPrompted,
   wasKokoroPrompted,
 } from '../tts/kokoroOffer';
+import { clampPocketRate, POCKET_RATE_MAX, POCKET_RATE_MIN } from '../tts/neural/pocket';
 import { ENGINE_SETTING } from '../tts/registry';
 import { Glyph, icons } from './Icon';
 import VoicePrompt from './VoicePrompt';
@@ -78,6 +79,8 @@ interface Props {
   sentenceTotal: number;
   /** Spoken sentences in the current plan; may be 0 when all blocks are skipped. */
   sentenceSpokenTotal?: number;
+  /** Play can advance from a silent chapter to the next readable chapter. */
+  canStartPlayback?: boolean;
   /** 1-based sentence number being synthesized right now, if any. */
   generating: number | null;
   /** How many upcoming sentences already have audio. */
@@ -109,6 +112,7 @@ const RATE_MAX = 2;
 const RATE_STEP = 0.05;
 /** The speeds most listeners actually use. Everything else lives on the slider. */
 const RATE_PRESETS = [0.75, 1, 1.25, 1.5, 2];
+const POCKET_RATE_PRESETS = [POCKET_RATE_MIN, 1, POCKET_RATE_MAX];
 
 /** Sleep timer choices. "End of chapter" is the one that is not a duration. */
 type SleepChoice = 'off' | '10' | '20' | '30' | 'end';
@@ -156,6 +160,7 @@ export default function PlayerBar({
   sentenceNumber,
   sentenceTotal,
   sentenceSpokenTotal,
+  canStartPlayback = (sentenceSpokenTotal ?? sentenceTotal) > 0,
   generating,
   readyAhead,
   pages,
@@ -175,6 +180,8 @@ export default function PlayerBar({
 }: Props) {
   const playing = state === 'playing';
   const busy = progress !== null;
+  const usingPocket = engineId === 'pocket';
+  const playbackRate = usingPocket ? clampPocketRate(rate) : rate;
   const [open, setOpen] = useState<'none' | 'speed' | 'more'>('none');
   const [sleepChoice, setSleepChoice] = useState<SleepChoice>('off');
   const [sleepEndsAt, setSleepEndsAt] = useState<number | null>(null);
@@ -414,12 +421,12 @@ export default function PlayerBar({
           <button
             type="button"
             className="rd-speed"
-            aria-label={`Playback speed ${rateLabel(rate)}`}
+            aria-label={`Playback speed ${rateLabel(playbackRate)}`}
             aria-expanded={open === 'speed'}
             onClick={() => togglePanel('speed')}
             data-tour="speed"
           >
-            {rateLabel(rate)}
+            {rateLabel(playbackRate)}
           </button>
 
           <button
@@ -434,7 +441,7 @@ export default function PlayerBar({
           <button
             type="button"
             className="rd-play"
-            disabled={(sentenceSpokenTotal ?? sentenceTotal) === 0}
+            disabled={state === 'idle' && !canStartPlayback}
             aria-label={playing ? 'Pause' : state === 'paused' ? 'Resume' : 'Play'}
             aria-pressed={playing}
             onClick={onToggle}
@@ -500,25 +507,26 @@ export default function PlayerBar({
         <div className="rd-pop-section" role="group" aria-label="Playback speed" hidden={open !== 'speed'}>
           <div className="rd-pop-head">
             <span className="rd-pop-title">Speed</span>
-            <span className="rd-pop-value">{rateLabel(rate)}</span>
+            <span className="rd-pop-value">{rateLabel(playbackRate)}</span>
           </div>
           <input
             className="rd-pop-range"
             type="range"
-            min={RATE_MIN}
-            max={RATE_MAX}
+            min={usingPocket ? POCKET_RATE_MIN : RATE_MIN}
+            max={usingPocket ? POCKET_RATE_MAX : RATE_MAX}
             step={RATE_STEP}
-            value={rate}
+            value={playbackRate}
             aria-label="Playback speed"
+            aria-valuetext={`${playbackRate} times`}
             onChange={(event) => onRate(Number(event.target.value))}
           />
           <div className="rd-presets">
-            {RATE_PRESETS.map((preset) => (
+            {(usingPocket ? POCKET_RATE_PRESETS : RATE_PRESETS).map((preset) => (
               <button
                 key={preset}
                 type="button"
                 className="rd-preset"
-                aria-pressed={Math.abs(rate - preset) < 0.001}
+                aria-pressed={Math.abs(playbackRate - preset) < 0.001}
                 onClick={() => onRate(preset)}
               >
                 {rateLabel(preset)}

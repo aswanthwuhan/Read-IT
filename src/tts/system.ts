@@ -89,6 +89,7 @@ function webVoiceFor(voices: SpeechSynthesisVoice[], id: string | undefined): Sp
 interface WebRun {
   stopped: boolean;
   paused: boolean;
+  pauseCount: number;
   /** Resolved by resume()/stop() while the loop is parked on a pause. */
   pauseWaiters: (() => void)[];
 }
@@ -126,9 +127,11 @@ function speakOne(
     u.lang = voice?.lang ?? lang;
     if (voice) u.voice = voice;
     u.rate = Math.min(WEB_RATE_MAX, Math.max(WEB_RATE_MIN, rate));
-    u.onstart = () => ev.onStart?.(sentenceId);
+    u.onstart = () => {
+      if (!cancelled()) ev.onStart?.(sentenceId);
+    };
     u.onboundary = (e) => {
-      if (e.name !== 'word' && e.name !== undefined) return;
+      if (cancelled() || (e.name !== 'word' && e.name !== undefined)) return;
       ev.onWord?.(sentenceId, charOffset + e.charIndex);
     };
     u.onend = () => {
@@ -139,6 +142,7 @@ function speakOne(
       resolve(!cancelled());
     };
     u.onerror = (e) => {
+      if (speaking === u) speaking = null;
       // Cancelling fires "canceled"/"interrupted"; that is us stopping, not a fault.
       const reason = (e as SpeechSynthesisErrorEvent).error;
       const expected = cancelled() || reason === 'canceled' || reason === 'interrupted';
@@ -208,20 +212,17 @@ const webEngine: TtsEngine = {
       webRun = null;
     }
 
-    // Some engines are left `paused` by an earlier cancel; speak() alone then
-    // silently queues nothing.
-    if (s.paused) s.resume();
-    // Cancel only what is actually queued: WebKit on iOS can drop a speak() that
-    // follows cancel() on an idle synthesizer, and Chrome Android drops one
-    // issued in the same tick as cancel().
-    if (s.speaking === true || s.pending === true) {
-      s.cancel();
-      await delay(50);
-    }
-
-    const run: WebRun = { stopped: false, paused: false, pauseWaiters: [] };
+    const run: WebRun = { stopped: false, paused: false, pauseCount: 0, pauseWaiters: [] };
     webRun = run;
     try {
+      // Some engines are left paused by a cancel. Let a stop or a newer run
+      // interrupt the wait before this run can start its first utterance.
+      if (s.paused) s.resume();
+      if (s.speaking === true || s.pending === true) {
+        s.cancel();
+        await delay(50);
+      }
+      if (run.stopped) return;
       const voices = await loadWebVoices();
       if (run.stopped) return;
       const voice = webVoiceFor(voices, opts.voiceId);
@@ -249,6 +250,8 @@ const webEngine: TtsEngine = {
           }
           if (run.stopped) return;
 
+          const pauseCount = run.pauseCount;
+          const wasPaused = () => run.pauseCount !== pauseCount;
           const completed = await speakOne(
             s,
             parts[p]!,
@@ -258,12 +261,12 @@ const webEngine: TtsEngine = {
             ev,
             item.id,
             offsets[p]!,
-            () => run.stopped || run.paused,
+            () => run.stopped || wasPaused(),
           );
           if (run.stopped) return;
-          if (run.paused) {
-            // We cancelled mid-chunk: replay this chunk once resume() wakes us.
-            if (!completed) p--;
+          if (!completed && wasPaused()) {
+            // Replay the interrupted chunk even if resume preceded the cancel event.
+            p--;
             continue;
           }
           if (!completed) return; // a real error (reported) or an external cancel
@@ -289,8 +292,9 @@ const webEngine: TtsEngine = {
   pause() {
     const run = webRun;
     const s = synth();
-    if (!run || !s || run.stopped) return;
+    if (!run || !s || run.stopped || run.paused) return;
     run.paused = true;
+    run.pauseCount += 1;
     // Never speechSynthesis.pause(): it is unreliable on Chrome Android and
     // can leave `paused` stuck after cancel(). Cancelling is honest.
     s.cancel();
@@ -437,9 +441,6 @@ const nativeEngine: TtsEngine = {
       .map((v) => ({ id: v.voiceURI, name: v.name, lang: v.lang }));
   },
   async speak(items, opts, ev) {
-    const tts = await loadNative();
-    nativeTts = tts;
-
     // Supersede any previous run still waiting on the plugin.
     const previous = nativeRun;
     if (previous) {
@@ -452,6 +453,9 @@ const nativeEngine: TtsEngine = {
     const run: NativeRun = { cancelled: false, paused: false, speakWaiters: [], pauseWaiters: [] };
     nativeRun = run;
     try {
+      const tts = await loadNative();
+      if (run.cancelled) return;
+      nativeTts = tts;
       // Voices are needed on both platforms: the plugin takes an array index.
       const voices = await loadNativeVoices();
       if (run.cancelled) return;
@@ -483,8 +487,7 @@ const nativeEngine: TtsEngine = {
               run,
             );
             if (run.cancelled) return;
-            if (run.paused) continue;
-            if (outcome === 'interrupted') return; // stopped by a newer call
+            if (run.paused || outcome === 'interrupted') continue;
             break;
           } catch (err) {
             if (run.cancelled) return;

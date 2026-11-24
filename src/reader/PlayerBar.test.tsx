@@ -148,6 +148,29 @@ async function waitFor(check: () => boolean, timeout = 3000): Promise<void> {
   }
 }
 
+describe('PlayerBar speed', () => {
+  it('shows the speed Pocket TTS can play and only offers supported speeds', async () => {
+    const props = makeProps({ engineId: 'pocket', rate: 2 });
+    await renderBar(props);
+
+    const speed = container.querySelector<HTMLButtonElement>('.rd-speed');
+    expect(speed?.getAttribute('aria-label')).toMatch(/^Playback speed 1\.25/);
+    await act(async () => speed?.click());
+
+    const slider = container.querySelector<HTMLInputElement>('input[aria-label="Playback speed"]');
+    expect(slider?.min).toBe('0.8');
+    expect(slider?.max).toBe('1.25');
+    expect(slider?.value).toBe('1.25');
+    const presets = [...container.querySelectorAll<HTMLButtonElement>('.rd-presets .rd-preset')];
+    expect(presets.map((preset) => Number.parseFloat(preset.textContent ?? ''))).toEqual([0.8, 1, 1.25]);
+    expect(presets[2]?.getAttribute('aria-pressed')).toBe('true');
+    expect(props.onRate).not.toHaveBeenCalled();
+
+    await act(async () => presets[0]?.click());
+    expect(props.onRate).toHaveBeenCalledWith(0.8);
+  });
+});
+
 describe('PlayerBar sleep timer', () => {
   it('pauses the voice when the timer runs out and clears itself', async () => {
     vi.useFakeTimers();

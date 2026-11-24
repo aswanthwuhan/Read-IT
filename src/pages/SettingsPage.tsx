@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import { CachePanel, LexiconPanel, VoicePanel, TTS_ENGINE_SETTING, TTS_RATE_SETTING } from '../tts/TtsSettings';
 import NeuralModelsPanel from '../tts/neural/NeuralModelsPanel';
 import AlignModelPanel from '../tts/align/AlignModelPanel';
@@ -44,8 +45,8 @@ const ENGINE_NAMES: Record<string, string> = {
 };
 
 /** The part of the URL hash that names an element, decoded. */
-function hashId(): string {
-  const raw = window.location.hash.replace(/^#/, '');
+function hashId(hash: string): string {
+  const raw = hash.replace(/^#/, '');
   if (!raw) return '';
   try {
     return decodeURIComponent(raw);
@@ -55,8 +56,8 @@ function hashId(): string {
 }
 
 /** Scroll to the section named by the URL hash, for links like /settings#voice-models. */
-export function scrollToHash(): void {
-  const id = hashId();
+export function scrollToHash(hash = window.location.hash): void {
+  const id = hashId(hash);
   if (!id) return;
   const target = document.getElementById(id);
   if (target && typeof target.scrollIntoView === 'function') {
@@ -101,6 +102,7 @@ function RowGroup({ label, id, children }: RowGroupProps) {
 }
 
 export default function SettingsPage() {
+  const { hash } = useLocation();
   const [openId, setOpenId] = useState<string | null>(null);
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
 
@@ -111,7 +113,7 @@ export default function SettingsPage() {
   const lastBackup = useSetting<number>(LAST_EXPORT_SETTING, 0);
   const updateCheck = useSetting<boolean>(UPDATE_CHECK_KEY, false) === true;
 
-  const voiceSummary = `${ENGINE_NAMES[engine] ?? engine} · ${rate.toFixed(1)}×`;
+  const voiceSummary = `${ENGINE_NAMES[engine] ?? engine} · ${rate.toFixed(2).replace(/0$/, '')}×`;
 
   /** Opening a row closes the previous one; clicking the open row closes it. */
   const toggle = (id: string) => {
@@ -120,15 +122,20 @@ export default function SettingsPage() {
 
   const openRow = (id: string) => setOpenId(id);
 
-  // Deep links: /settings#backup arrives on mount, and later hash changes
-  // (the section list) open their row and scroll to it.
+  // React Router writes tutorial URLs with pushState. Native in-page links
+  // still use hashchange, so listen to both navigation paths.
+  useEffect(() => {
+    const id = hashId(hash);
+    if (ROW_IDS.includes(id)) setOpenId(id);
+    scrollToHash(hash);
+  }, [hash]);
+
   useEffect(() => {
     const openFromHash = () => {
-      const id = hashId();
+      const id = hashId(window.location.hash);
       if (ROW_IDS.includes(id)) setOpenId(id);
       scrollToHash();
     };
-    openFromHash();
     window.addEventListener('hashchange', openFromHash);
     return () => window.removeEventListener('hashchange', openFromHash);
   }, []);
@@ -275,7 +282,7 @@ export default function SettingsPage() {
 
                 <p className="card-body about-copy">
                   Read IT is an offline ebook reader. Your books, highlights, notes and listening progress stay on this
-                  device. No account, no server, and no text leaves the app unless you turn on the optional update check.
+                  device. The optional update check contacts GitHub for release information. It sends no library data.
                 </p>
 
                 <label className="update-optin">
@@ -298,7 +305,7 @@ export default function SettingsPage() {
                 </label>
 
                 <div className="about-links">
-                  <button type="button" className="btn btn-secondary" onClick={startTutorial}>
+                  <button type="button" className="btn btn-secondary" onClick={(event) => startTutorial(event.currentTarget)}>
                     How to use Read IT
                   </button>
                   <button type="button" className="btn btn-secondary" onClick={() => setWhatsNewOpen(true)}>

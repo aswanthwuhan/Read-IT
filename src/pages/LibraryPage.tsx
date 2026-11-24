@@ -18,7 +18,7 @@ import { LAST_BOOK_KEY, type LastBook } from '../reader/lastBook';
 import ModelStatusBanner from '../tts/ModelStatusBanner';
 import { LAST_EXPORT_SETTING } from '../backup/backup';
 
-const ACCEPT = '.pdf,.epub,.docx,.txt,.md,.html';
+const ACCEPT = '.pdf,.epub,.docx,.txt,.md,.markdown,.html,.htm,.xhtml';
 
 /** Set when the reader dismisses the reminder, so it stays quiet for a week. */
 const BACKUP_DISMISS_KEY = 'backup.reminderDismissedAt';
@@ -77,7 +77,7 @@ function readingProgress(book: BookRecord): number | null {
     }
     break;
   }
-  return Math.round((seen / total) * 100);
+  return null;
 }
 
 function chapterCount(book: BookRecord): number {
@@ -201,12 +201,16 @@ function BookActionsSheet({
       const focusable = [...sheetRef.current.querySelectorAll<HTMLElement>(
         'button:not(:disabled), select:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
       )];
-      if (focusable.length === 0) return;
+      if (focusable.length === 0) {
+        event.preventDefault();
+        sheetRef.current.focus();
+        return;
+      }
       const first = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
-      if (!sheetRef.current.contains(document.activeElement)) {
+      if (document.activeElement === sheetRef.current || !sheetRef.current.contains(document.activeElement)) {
         event.preventDefault();
-        first.focus();
+        (event.shiftKey ? last : first).focus();
       } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
@@ -227,6 +231,11 @@ function BookActionsSheet({
       dispose();
     };
   }, []);
+
+  useEffect(() => {
+    if (columnsBusy) sheetRef.current?.focus();
+    else if (document.activeElement === sheetRef.current) columnsRef.current?.focus();
+  }, [columnsBusy]);
 
   async function changeColumns(value: string): Promise<void> {
     const next: ColumnMode = value === '2' ? 2 : value === '1' ? 1 : 'auto';
@@ -251,7 +260,7 @@ function BookActionsSheet({
   return (
     <>
       <div className="sheet-backdrop" onClick={close} />
-      <div ref={sheetRef} className="sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId}>
+      <div ref={sheetRef} className="sheet" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId}>
         <h2 id={titleId} className="sheet-title lib-sheet-title">
           {book.title}
         </h2>
@@ -348,9 +357,20 @@ export default function LibraryPage() {
   const [pasteTitle, setPasteTitle] = useState('');
   const [pasteText, setPasteText] = useState('');
 
+  const importInFlight = useRef(false);
+  const mounted = useRef(true);
   const busy = status !== null;
   const loading = books === undefined;
   const shelf = books ?? [];
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      answerRef.current?.(null);
+      answerRef.current = null;
+    };
+  }, []);
 
   // The Android back key closes an open import panel before it can mean
   // "leave the library": a half-typed URL or pasted chapter is not lost by
@@ -423,108 +443,116 @@ export default function LibraryPage() {
 
   async function handleFiles(list: FileList | null) {
     const files = Array.from(list ?? []);
-    if (!files.length || busy) return;
+    if (!files.length || importInFlight.current) return;
 
+    importInFlight.current = true;
+    setStatus(files.length === 1 ? `Getting ${files[0].name} ready…` : `Getting ${files.length} files ready…`);
     setErrors([]);
     setWarnings([]);
 
-    // The question is for PDFs only: every other format is read from its own
-    // structure. It is asked once and applies to every PDF in the pick.
-    const pdfs = files.filter((file) => detectFormat(file) === 'pdf');
-    let pdfLayout: LayoutMode | undefined;
-    let layoutNote: string | undefined;
+    try {
+      // The question is for PDFs only: every other format is read from its own
+      // structure. It is asked once and applies to every PDF in the pick.
+      const pdfs = files.filter((file) => detectFormat(file) === 'pdf');
+      let pdfLayout: LayoutMode | undefined;
+      let layoutNote: string | undefined;
 
-    if (pdfs.length) {
-      const mode = await getSetting<LayoutMode>('import.layout', 'auto').catch(() => 'auto' as LayoutMode);
-      const stored = await getSetting<ImportLayoutChoice>(IMPORT_LAYOUT_KEY, 'ask').catch(
-        () => 'ask' as ImportLayoutChoice,
-      );
-
-      if (mode === 'heuristic') {
-        // The reader already turned the model off device-wide: there is nothing
-        // to ask, and a download here would contradict their choice.
-        pdfLayout = 'heuristic';
-      } else if (canRunLayoutModel() && stored === 'ask') {
-        const modelReady = await isLayoutModelReady();
-        setStatus(
-          pdfs.length === 1 ? `Getting ${pdfs[0].name} ready…` : `Getting ${pdfs.length} PDFs ready…`,
+      if (pdfs.length) {
+        const mode = await getSetting<LayoutMode>('import.layout', 'auto').catch(() => 'auto' as LayoutMode);
+        const stored = await getSetting<ImportLayoutChoice>(IMPORT_LAYOUT_KEY, 'ask').catch(
+          () => 'ask' as ImportLayoutChoice,
         );
-        const answer = await askLayout({ count: pdfs.length, modelReady });
-        if (!answer) {
-          // Dismissed: the whole pick is dropped, so nothing lands half-imported.
-          setStatus(null);
-          if (fileInput.current) fileInput.current.value = '';
-          return;
+
+        if (mode === 'heuristic') {
+          // The reader already turned the model off device-wide: there is nothing
+          // to ask, and a download here would contradict their choice.
+          pdfLayout = 'heuristic';
+        } else if (canRunLayoutModel() && stored === 'ask') {
+          const modelReady = await isLayoutModelReady();
+          if (!mounted.current) return;
+          const answer = await askLayout({ count: pdfs.length, modelReady });
+          // Dismissing the question drops the whole pick.
+          if (!answer) return;
+          if (answer.remember) void setSetting(IMPORT_LAYOUT_KEY, answer.choice).catch(() => undefined);
+          pdfLayout = layoutForChoice(answer.choice);
+          layoutNote = answer.note;
+        } else if (stored !== 'ask') {
+          // A remembered answer, or a device that cannot store the model, is used
+          // without a sheet — the same import a return visit gets.
+          pdfLayout = layoutForChoice(stored);
         }
-        if (answer.remember) void setSetting(IMPORT_LAYOUT_KEY, answer.choice).catch(() => undefined);
-        pdfLayout = layoutForChoice(answer.choice);
-        layoutNote = answer.note;
-      } else if (stored !== 'ask') {
-        // A remembered answer, or a device that cannot store the model, is used
-        // without a sheet — the same import a return visit gets.
-        pdfLayout = layoutForChoice(stored);
-      }
 
-      // Wanted the model but it is not here: the import still happens, and the
-      // warning says what actually read the book.
-      if (pdfLayout === 'auto' && !layoutNote && !(await isLayoutModelReady())) {
-        layoutNote =
-          'The layout model is not downloaded, so the text layout was used instead. Download it in Settings → PDF layout.';
-      }
-
-      if (layoutNote) {
-        const file = pdfs.length === 1 ? pdfs[0].name : `${pdfs.length} PDFs`;
-        setWarnings([{ file, message: layoutNote, scanned: false }]);
-      }
-    }
-
-    for (let index = 0; index < files.length; index++) {
-      const file = files[index];
-      const prefix = files.length > 1 ? `Importing ${index + 1} of ${files.length}: ${file.name}` : `Importing ${file.name}`;
-      setStatus(`${prefix}…`);
-      try {
-        const result = await importFileDetailed(
-          file,
-          (progressNote) => setStatus(`${prefix} — ${progressNote}…`),
-          { pdfLayout: detectFormat(file) === 'pdf' ? pdfLayout : undefined },
-        );
-        const warning = result.warning;
-        if (warning) {
-          setWarnings((current) => [
-            ...current,
-            { file: file.name, message: warning, scanned: warning.startsWith('Looks scanned') },
-          ]);
+        // Wanted the model but it is not here: the import still happens, and the
+        // warning says what actually read the book.
+        if (pdfLayout === 'auto' && !layoutNote && !(await isLayoutModelReady())) {
+          layoutNote =
+            'The layout model is not downloaded, so the text layout was used instead. Download it in Settings → PDF layout.';
         }
-        if (files.length === 1 && !warning) navigate(`/read/${result.bookId}`);
-      } catch (error) {
-        setErrors((current) => [...current, `${file.name}: ${errorMessage(error)}`]);
-      }
-    }
 
+        if (layoutNote) {
+          const file = pdfs.length === 1 ? pdfs[0].name : `${pdfs.length} PDFs`;
+          setWarnings([{ file, message: layoutNote, scanned: false }]);
+        }
+      }
+
+      if (!mounted.current) return;
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        const prefix = files.length > 1 ? `Importing ${index + 1} of ${files.length}: ${file.name}` : `Importing ${file.name}`;
+        setStatus(`${prefix}…`);
+        try {
+          const result = await importFileDetailed(
+            file,
+            (progressNote) => setStatus(`${prefix} — ${progressNote}…`),
+            { pdfLayout: detectFormat(file) === 'pdf' ? pdfLayout : undefined },
+          );
+          const warning = result.warning;
+          if (warning) {
+            setWarnings((current) => [
+              ...current,
+              { file: file.name, message: warning, scanned: warning.startsWith('Looks scanned') },
+            ]);
+          }
+          if (mounted.current && files.length === 1 && !warning && !layoutNote) navigate(`/read/${result.bookId}`);
+        } catch (error) {
+          setErrors((current) => [...current, `${file.name}: ${errorMessage(error)}`]);
+        }
+      }
+    } catch (error) {
+      setErrors([errorMessage(error)]);
+    } finally {
+      finishImport();
+    }
+  }
+
+  function finishImport(): void {
+    importInFlight.current = false;
     setStatus(null);
     if (fileInput.current) fileInput.current.value = '';
   }
 
   async function handleUrl(event: FormEvent) {
     event.preventDefault();
-    if (!url.trim() || busy) return;
+    if (!url.trim() || importInFlight.current) return;
+    importInFlight.current = true;
     setErrors([]);
     setWarnings([]);
     setStatus('Fetching the article…');
     try {
       const bookId = await importUrl(url);
       setUrl('');
-      navigate(`/read/${bookId}`);
+      if (mounted.current) navigate(`/read/${bookId}`);
     } catch (error) {
       setErrors([errorMessage(error)]);
     } finally {
-      setStatus(null);
+      finishImport();
     }
   }
 
   async function handleText(event: FormEvent) {
     event.preventDefault();
-    if (!pasteText.trim() || busy) return;
+    if (!pasteText.trim() || importInFlight.current) return;
+    importInFlight.current = true;
     setErrors([]);
     setWarnings([]);
     setStatus('Saving the text…');
@@ -532,11 +560,11 @@ export default function LibraryPage() {
       const bookId = await importText(pasteTitle, pasteText);
       setPasteTitle('');
       setPasteText('');
-      navigate(`/read/${bookId}`);
+      if (mounted.current) navigate(`/read/${bookId}`);
     } catch (error) {
       setErrors([errorMessage(error)]);
     } finally {
-      setStatus(null);
+      finishImport();
     }
   }
 
@@ -734,8 +762,7 @@ export default function LibraryPage() {
             <p>
               {warning.scanned ? (
                 <>
-                  <strong>{warning.file}</strong> has no text layer, so there is nothing to read, search or listen to
-                  in it yet.
+                  <strong>{warning.file}</strong> contains very little selectable text. Available text can still be read and listened to.
                 </>
               ) : (
                 <>
@@ -790,7 +817,7 @@ export default function LibraryPage() {
             </li>
           </ol>
           <p className="lib-empty-note">
-            Image-only “scanned” PDFs have no text to extract yet, so they open empty. OCR is still to come.
+            Image-only PDFs need a text layer added with OCR before you can import them.
           </p>
           <div className="empty-state-actions">
             <button type="button" className="btn btn-primary" onClick={() => fileInput.current?.click()} disabled={busy}>

@@ -116,6 +116,7 @@ export default function ReflowView({
   const longFired = useRef(false);
   const selectionTimer = useRef<number | null>(null);
   const moreRef = useRef<HTMLButtonElement>(null);
+  const followedId = useRef<string | null>(null);
 
   const orderOf = useMemo(() => new Map(sentences.map((sentence, i) => [sentence.id, i])), [sentences]);
   const byId = useMemo(() => new Map(sentences.map((sentence) => [sentence.id, sentence])), [sentences]);
@@ -125,7 +126,7 @@ export default function ReflowView({
     windowRange(sentences.length, readingId ? (orderOf.get(readingId) ?? 0) : 0, WINDOW_RADIUS)
   );
 
-  // Follow the spoken sentence and keep the rendered window around it.
+  // Ensure a distant reading position is mounted before trying to scroll to it.
   useEffect(() => {
     const at = readingId ? orderOf.get(readingId) : undefined;
     if (at === undefined) return;
@@ -136,8 +137,17 @@ export default function ReflowView({
       }
       return current;
     });
-    const element = host.current?.querySelector<HTMLElement>(`[data-sid="${readingId}"]`);
+  }, [readingId, orderOf, sentences.length]);
+
+  useEffect(() => {
+    if (readingId === null) {
+      followedId.current = null;
+      return;
+    }
+    if (followedId.current === readingId) return;
+    const element = host.current?.querySelector<HTMLElement>('.rd-s.reading');
     if (!element) return;
+    followedId.current = readingId;
     const box = element.getBoundingClientRect();
     const top = 72;
     const bottom = window.innerHeight - 200;
@@ -146,9 +156,7 @@ export default function ReflowView({
         && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       element.scrollIntoView?.({ behavior: reduced ? 'auto' : 'smooth', block: 'center' });
     }
-    // onSentence fires often with the same id; the window check is cheap.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readingId, orderOf, sentences.length]);
+  }, [readingId, win]);
 
   useEffect(() => {
     return () => {
