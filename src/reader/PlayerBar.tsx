@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { pushBackHandler } from '../core/backButton';
+import { useFocusGuard } from '../core/focusGuard';
 import { getSetting } from '../core/settings';
 import { useDownload } from '../tts/downloads';
 import {
@@ -186,6 +187,18 @@ export default function PlayerBar({
   const [sleepChoice, setSleepChoice] = useState<SleepChoice>('off');
   const [sleepEndsAt, setSleepEndsAt] = useState<number | null>(null);
   const [sleepNow, setSleepNow] = useState(() => Date.now());
+  const popRef = useRef<HTMLDivElement>(null);
+  const speedRef = useRef<HTMLInputElement>(null);
+  const speedButtonRef = useRef<HTMLButtonElement>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  useFocusGuard({
+    active: open !== 'none',
+    mode: 'popover',
+    containerRef: popRef,
+    initialFocusRef: open === 'speed' ? speedRef : undefined,
+    returnFocusRef: open === 'speed' ? speedButtonRef : moreButtonRef,
+    onEscape: () => setOpen('none'),
+  });
 
   // Both callbacks are re-created by the reader on every render; keep the
   // interval and the choice handler reading the current ones.
@@ -285,15 +298,6 @@ export default function PlayerBar({
     sleepAtChapterEnd.current(false);
   }
 
-  useEffect(() => {
-    if (open === 'none') return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen('none');
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
-
   // The Android back key dismisses the popover the way Escape does. Without
   // this the press reaches the app bridge, which leaves the book: the sheet was
   // the top layer, so it has to be the thing that closes.
@@ -390,6 +394,7 @@ export default function PlayerBar({
             className="rd-icon-btn"
             aria-label="Playback options"
             aria-expanded={open === 'more'}
+            ref={moreButtonRef}
             onClick={() => togglePanel('more')}
             data-tour="more"
           >
@@ -423,6 +428,7 @@ export default function PlayerBar({
             className="rd-speed"
             aria-label={`Playback speed ${rateLabel(playbackRate)}`}
             aria-expanded={open === 'speed'}
+            ref={speedButtonRef}
             onClick={() => togglePanel('speed')}
             data-tour="speed"
           >
@@ -503,13 +509,14 @@ export default function PlayerBar({
 
       {/* Both popovers stay mounted: the speed slider keeps its position and
           focus between openings, and nothing about playback is re-created. */}
-      <div className="rd-pop" hidden={open === 'none'}>
+      <div ref={popRef} className="rd-pop" hidden={open === 'none'}>
         <div className="rd-pop-section" role="group" aria-label="Playback speed" hidden={open !== 'speed'}>
           <div className="rd-pop-head">
             <span className="rd-pop-title">Speed</span>
             <span className="rd-pop-value">{rateLabel(playbackRate)}</span>
           </div>
           <input
+            ref={speedRef}
             className="rd-pop-range"
             type="range"
             min={usingPocket ? POCKET_RATE_MIN : RATE_MIN}

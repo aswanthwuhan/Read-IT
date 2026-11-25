@@ -111,6 +111,29 @@ describe('audio cache', () => {
     expect((await getAudio('k1'))?.durationMs).toBe(2000);
   });
 
+  it('clears one engine by index without reading unrelated audio rows', async () => {
+    await putAudio(rec('system-a', 'system', 10));
+    await putAudio(rec('kokoro-a', 'kokoro', 30));
+    expect(await cacheSizeBytes()).toBe(40);
+
+    const reads: string[] = [];
+    let watching = true;
+    db.audioCache.hook('reading', (record) => {
+      if (watching) reads.push(record.key);
+      return record;
+    });
+    try {
+      await clearAudio('system');
+    } finally {
+      watching = false;
+    }
+
+    expect(reads).not.toContain('kokoro-a');
+    expect(await getAudio('system-a')).toBeUndefined();
+    expect(await getAudio('kokoro-a')).toBeTruthy();
+    expect(await cacheSizeBytes()).toBe(30);
+  });
+
   it('reports total size and clears one engine only', async () => {
     await putAudio(rec('a', 'system', 10));
     await putAudio(rec('b', 'system', 20));

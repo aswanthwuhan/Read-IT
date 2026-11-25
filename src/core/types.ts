@@ -106,6 +106,50 @@ export interface BookRecord {
   columns?: ColumnMode;
 }
 
+/**
+ * The small, persisted shape the library needs. Blocks keep their ids as well as
+ * their sentence counts because a manual page reorder moves whole blocks without
+ * renumbering their sentences.
+ */
+export interface BookSummaryBlock {
+  id: string;
+  sentenceCount: number;
+}
+
+export interface BookSummaryChapter {
+  id: string;
+  title: string;
+  sentenceCount: number;
+  blocks: BookSummaryBlock[];
+}
+
+/** Derived from a BookRecord; never replaces the authoritative parsed document. */
+export interface BookSummary {
+  id: string;
+  title: string;
+  author?: string;
+  format: DocFormat;
+  addedAt: number;
+  columns?: ColumnMode;
+  lastPos?: { chapterId: string; sentenceId: string };
+  chapterCount: number;
+  sentenceCount: number;
+  chapters: BookSummaryChapter[];
+}
+
+/** A shelf row. Missing summaries degrade to a usable placeholder, never fake stats. */
+export interface LibraryBook {
+  id: string;
+  title: string;
+  author?: string;
+  format: DocFormat | null;
+  addedAt: number;
+  columns?: ColumnMode;
+  chapterCount: number | null;
+  progress: number | null;
+  unavailable: boolean;
+}
+
 /** A user highlight over one or more sentences. */
 export interface Highlight {
   id: string;

@@ -320,11 +320,13 @@ class KokoroNativeEngine implements TtsEngine {
    * the int8 clips v0.3.3 cached are never replayed as fp32 audio (and the reverse
    * never happens after a downgrade); the speaker is resolved exactly as
    * `synthesize()` resolves it. `@chunked` retires the clips rendered by the
-   * one-call path, whose long sentences lost their ending.
+   * one-call path, whose long sentences lost their ending. `@chunked-lead-safe-v2`
+   * retires clips rendered before Android stopped trimming the leading edge,
+   * which could cut quiet opening words.
    */
   async cacheVariant(voiceId?: string): Promise<string> {
     const sid = sidFromVoiceId(voiceId ?? (await voiceSetting()));
-    return `${sid}@${await modelSetting()}@chunked`;
+    return `${sid}@${await modelSetting()}@chunked-lead-safe-v2`;
   }
 
   /** Speak the sentences in order, synthesising the next chunk during playback. */

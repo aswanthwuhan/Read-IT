@@ -415,7 +415,6 @@
 /* Text the voice will not read (tables, figures, footnotes by default): still
    legible, clearly apart from the prose it belongs to. */
 .is-skipped {
-  opacity: 0.72;
   color: var(--muted);
 }
 
@@ -1146,11 +1145,19 @@ body:has(.rd-sheet) {
   font-size: var(--fs-sm);
 }
 
-.rd-tabs {
+.rd-tabs-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+.rd-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1183,7 +1190,10 @@ body:has(.rd-sheet) {
 
 .rd-tab-close {
   flex: none;
-  margin-left: auto;
+}
+
+.rd-tab-panel:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
 }
 
 .rd-toc {
@@ -1823,12 +1833,8 @@ body:has(.rd-sheet) {
   min-width: 3.5em;
 }
 
-/* A phone pinches; the two zoom buttons would cost the page a second row. */
-@media (max-width: 479.98px) {
-  .rd-pdf-zoom .btn:not([aria-pressed]) {
-    display: none;
-  }
-}
+/* Every page control stays reachable on a phone. The row wraps rather than
+   hiding the zoom buttons: pinch is a convenience, not the only way to zoom. */
 
 /* -- short windows: a phone on its side ------------------------------------ */
 

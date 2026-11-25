@@ -98,13 +98,6 @@ export const icons = {
     </>
   ),
   bookmark: <path d="M7 4.5h10v15l-5-3.6-5 3.6v-15Z" />,
-  card: (
-    <>
-      <rect x="3.5" y="6" width="17" height="12" rx="2" />
-      <path d="M7 10h5" />
-      <path d="M7 14h9" />
-    </>
-  ),
   sparkle: (
     <>
       <path d="M12 4.5 13.7 10 19 11.7 13.7 13.4 12 19l-1.7-5.6L5 11.7 10.3 10 12 4.5Z" />

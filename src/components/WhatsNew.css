@@ -111,6 +111,12 @@
   line-height: var(--lh-snug);
 }
 
+.update-optin-error {
+  color: var(--danger);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+}
+
 /* Library: "Read IT x is available". The backup banner beside it has one
    icon button; this one ends in two text actions, so it gets its own classes
    rather than borrowing .lib-backup (which tests and the reader both key on). */

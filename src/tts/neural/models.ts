@@ -28,8 +28,8 @@ export const KOKORO_VOICES_CACHE = 'kokoro-voices';
 
 /**
  * Every file `pocket-tts-js` needs before it can speak: the 4 INT8 graphs, the
- * bundle + tokenizer, and `voices.bin` (52 MB, fetched by the first voice load —
- * `prepare()` warms it so that first Play is not a silent download).
+ * bundle + tokenizer, and `voices.bin` (upstream is 52 MB; releases should use
+ * the six-voice pruned asset — `prepare()` warms it so first Play is not a silent download).
  */
 export const POCKET_FILES = [
   'bundle.json',

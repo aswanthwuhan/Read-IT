@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { db } from './db';
-import { contentBytes, deleteContent, getContent, hydrateBook, putContent } from './contentStore';
+import { contentBytes, deleteContent, getContent, getParsedContent, hydrateBook, putContent } from './contentStore';
 import type { BookRecord } from './types';
 
 /** Over 100 KB of realistic parsed-document JSON. */
@@ -58,10 +58,10 @@ afterEach(async () => {
 });
 
 describe('contentStore', () => {
-  it('version 2 keeps every version-1 table and adds bookContent', () => {
-    expect(db.verno).toBe(2);
+  it('version 4 keeps every portable table and adds content plus summaries', () => {
+    expect(db.verno).toBe(4);
     expect(db.tables.map((t) => t.name).sort()).toEqual([
-      'audioCache', 'bookContent', 'bookmarks', 'books', 'highlights', 'lexicon', 'settings',
+      'audioCache', 'bookContent', 'bookSummaries', 'bookmarks', 'books', 'highlights', 'lexicon', 'settings',
     ]);
   });
 
@@ -119,6 +119,16 @@ describe('contentStore', () => {
     });
 
     await expect(getContent('odd')).resolves.toBeNull();
+  });
+
+  it('getParsedContent returns a usable document and null for damaged rows', async () => {
+    await putContent('parsed', JSON.stringify({ title: 'Notes', format: 'txt', chapters: [] }));
+    await expect(getParsedContent('parsed')).resolves.toMatchObject({ title: 'Notes', chapters: [] });
+
+    await putContent('parsed', '{not json');
+    await expect(getParsedContent('parsed')).resolves.toBeNull();
+    await putContent('parsed', JSON.stringify({ title: 'No chapters' }));
+    await expect(getParsedContent('parsed')).resolves.toBeNull();
   });
 
   it('hydrateBook reads parsed from the content store when a row exists', async () => {

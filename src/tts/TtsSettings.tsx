@@ -52,8 +52,8 @@ const ENGINE_OPTIONS: { value: EngineChoice; label: string; hint: string }[] = [
   },
   {
     value: 'system',
-    label: 'System voices (free, offline)',
-    hint: 'The voices your phone already has. No download, works offline, and follows the device speed.',
+    label: 'System voices',
+    hint: 'The voices your phone provides. No download in Read IT, but some system voices may use a network connection.',
   },
   {
     value: 'pocket',
@@ -63,7 +63,7 @@ const ENGINE_OPTIONS: { value: EngineChoice; label: string; hint: string }[] = [
   {
     value: 'kokoro',
     label: 'Kokoro (on-device model)',
-    hint: `Kokoro-82M, ${kokoroSizeMb()} MB download. Faster than real-time on most phones.`,
+    hint: `Kokoro-82M, ${kokoroSizeMb()} MB download. Speed varies by device; use Measure speed in On-device models to check this phone.`,
   },
 ];
 
@@ -922,20 +922,6 @@ export function CachePanel() {
       </details>
 
       <ErrorBanner message={error} />
-    </div>
-  );
-}
-
-/**
- * All three voice panels in one stack, without page headings — the Settings page
- * places each panel under its own section heading.
- */
-export default function TtsSettings() {
-  return (
-    <div className="tts-settings">
-      <VoicePanel />
-      <LexiconPanel />
-      <CachePanel />
     </div>
   );
 }

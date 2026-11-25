@@ -7,21 +7,26 @@
  * model already downloaded — but not loaded in this session — with no voice
  * picker at all, so the reader could not choose a voice before pressing Play.
  *
- * The names below are that file's list, verbatim, for the one pinned bundle
- * (`LANGUAGE = 'english_2026-04'` in `pocket.ts`):
+ * The names below are the current file's safe subset for the English bundle
+ * (`LANGUAGE = 'english_2026-04'` in `pocket.ts`). The upstream URL below is
+ * currently mutable and must be pinned before release:
  * https://huggingface.co/vlapky/pocket-tts-onnx/resolve/main/onnx/english_2026-04/bundle.json
  *
- * Keep this list in step with the bundle. `pocket.ts` should eventually import
- * it as the fallback for `listVoices()` (and for the first-voice default) so the
- * panel and the engine cannot disagree.
+ * Keep this list in step with the bundle. `pocket.ts` uses it as the
+ * authoritative runtime allowlist and fixed default, so the panel, synthesis
+ * and cache identity cannot disagree about a commercially usable voice.
  *
  * Two voices from the upstream bundle are deliberately absent: `cosette`
  * (Expresso) and `jean` (EARS) are **CC-BY-NC-4.0, non-commercial only**
  * (https://huggingface.co/kyutai/tts-voices). A commercial build cannot
- * distribute them, so they are neither offered nor fetched. The remaining
+ * distribute them, so they are neither offered nor loaded. The remaining
  * voices are CC0 (voice-donations) or CC-BY-4.0 (VCTK, alba) and carry an
  * attribution requirement, which is shown in the app's About screen.
  * `scripts/check-licences.mjs` fails the build if either name reappears.
+ *
+ * The upstream monolithic `voices.bin` can still contain the excluded tensors.
+ * Before a commercial release, host a pruned, pinned bundle through
+ * `PocketTTS({ voicesUrl })`; filtering names alone does not remove those bytes.
  */
 import type { TtsVoice } from '../../core/types';
 

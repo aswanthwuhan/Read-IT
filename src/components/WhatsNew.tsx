@@ -26,7 +26,10 @@ export default function WhatsNew({ version, onClose }: WhatsNewProps) {
   const gotItRef = useRef<HTMLButtonElement>(null);
   const tellMeRef = useRef<HTMLButtonElement>(null);
   const updatesOn = useSetting<boolean>(UPDATE_CHECK_KEY, false);
-  const [justEnabled, setJustEnabled] = useState(false);
+  const [optInState, setOptInState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const savingRef = useRef(false);
+  const saving = optInState === 'saving';
+  const justEnabled = optInState === 'saved';
 
   const section = changelogSection(version);
   // Latest callbacks without re-running the focus/keyboard effect on each render.
@@ -92,9 +95,18 @@ export default function WhatsNew({ version, onClose }: WhatsNewProps) {
     };
   }, []);
 
-  const tellMeAboutUpdates = () => {
-    setJustEnabled(true);
-    void setSetting(UPDATE_CHECK_KEY, true).catch(() => undefined);
+  const tellMeAboutUpdates = async (): Promise<void> => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setOptInState('saving');
+    try {
+      await setSetting(UPDATE_CHECK_KEY, true);
+      setOptInState('saved');
+    } catch {
+      setOptInState('error');
+    } finally {
+      savingRef.current = false;
+    }
   };
 
   return (
@@ -128,17 +140,28 @@ export default function WhatsNew({ version, onClose }: WhatsNewProps) {
         )}
 
         <div className="sheet-actions whatsnew-actions">
-          {updatesOn ? (
+          {updatesOn || justEnabled ? (
             justEnabled ? (
               <p className="whatsnew-note muted" role="status">
                 Update checks are on. You can turn them off in Settings → About.
               </p>
             ) : null
           ) : (
-            <button ref={tellMeRef} type="button" className="btn btn-secondary" onClick={tellMeAboutUpdates}>
-              Tell me about updates
+            <button
+              ref={tellMeRef}
+              type="button"
+              className="btn btn-secondary"
+              disabled={saving}
+              onClick={tellMeAboutUpdates}
+            >
+              {saving ? 'Turning on…' : 'Tell me about updates'}
             </button>
           )}
+          {optInState === 'error' ? (
+            <p className="whatsnew-note" role="alert">
+              Couldn’t turn on update checks. Please try again.
+            </p>
+          ) : null}
           <button ref={gotItRef} type="button" className="btn btn-primary" onClick={close}>
             Got it
           </button>

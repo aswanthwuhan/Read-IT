@@ -17,7 +17,7 @@ import {
   type UnzipFileInfo,
 } from 'fflate';
 import type { Table } from 'dexie';
-import { db } from '../core/db';
+import { db, summarizeBook } from '../core/db';
 import type { StoredContent } from '../core/contentStore';
 import { isIos } from '../core/platform';
 import { BLOCK_KINDS } from '../core/types';
@@ -32,6 +32,7 @@ import type {
   Sentence,
   Setting,
 } from '../core/types';
+import { resetAudioSizeCache } from '../tts/cache';
 
 export const BACKUP_APP = 'Read IT';
 /**
@@ -87,9 +88,16 @@ export interface BackupManifest {
 
 export interface ImportReport {
   mode: ImportMode;
+  /** Rows written, by table: inserted on Merge and overwritten on Replace. */
   counts: Record<string, number>;
+  /** Incoming rows not written because of duplicates, collisions or orphan content. */
+  skipped: Record<string, number>;
+  /** Skipped rows whose id collided locally, with a book aggregate or in the backup itself. */
+  collisions: Record<string, number>;
   /** Book ids whose original file was not inside the zip. */
   missingFile: string[];
+  /** True only after a successful Replace transaction also cleared cached audio. */
+  audioCleared: boolean;
 }
 
 const MIME: Record<DocFormat, string> = {
@@ -115,9 +123,9 @@ const BOOK_JSON_RE = /^data\/books\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.json$/;
 /** Schema 3: already-compressed document bytes, one entry per book. */
 const CONTENT_BIN_RE = /^content\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.bin$/;
 
-/** Every table except the audio cache, which is rebuildable and huge. */
+/** Every portable table except the audio cache and the rebuildable shelf index. */
 function dataTables(): Table[] {
-  return db.tables.filter((t) => t.name !== 'audioCache');
+  return db.tables.filter((t) => t.name !== 'audioCache' && t.name !== 'bookSummaries');
 }
 
 function isPrivateSetting(row: Setting): boolean {
@@ -281,27 +289,218 @@ export async function importBackup(file: Blob, mode: ImportMode): Promise<Import
   for (const [name, rows] of payload) {
     prepared.set(
       name,
-      name === 'books' ? await attachBookFiles(bookRows, files, missingFile) : rows,
+      name === 'books' ? await attachBookFiles(bookRows, files, missingFile, mode) : rows,
     );
   }
 
   const counts: Record<string, number> = {};
+  const skipped: Record<string, number> = {};
+  const collisions: Record<string, number> = {};
+  // Replace clears rebuildable audio in the same transaction as the restore.
+  // Merge does not include that store, so cached speech survives untouched.
+  const transactionTables = mode === 'replace'
+    ? [...tables, db.bookSummaries, db.audioCache]
+    : [...tables, db.bookSummaries];
 
-  await db.transaction('rw', tables, async () => {
+  await db.transaction('rw', transactionTables, async () => {
     if (mode === 'replace') {
       // Settings survive on purpose: they hold this device's private config,
       // which the export omits — wiping them would lock the user out.
       for (const table of tables) if (table.name !== 'settings') await table.clear();
+      await db.bookSummaries.clear();
+      await db.audioCache.clear();
     }
+
+    const bookTable = db.books as Table<unknown, string>;
+    const incomingBooks = prepared.get('books') ?? [];
+    let writtenBooks: WrittenRows = { insertedKeys: new Set(), rows: [] };
+    if (incomingBooks.length > 0) {
+      writtenBooks = mode === 'replace'
+        ? await replaceRows(bookTable, incomingBooks, counts, skipped, collisions)
+        : await mergeRows(bookTable, incomingBooks, counts, skipped, collisions);
+    }
+    const incomingBookIds = new Set(incomingBooks.map((row) => rowKey(bookTable, row)));
+    // Summaries are derived from the rows that actually won the merge/replace,
+    // never copied from the archive. This keeps schema 3 (and older zips) portable.
+    if (writtenBooks.rows.length) {
+      await db.bookSummaries.bulkPut(writtenBooks.rows.map((row) => summarizeBook(row as BookRecord)));
+    }
+
     for (const table of tables) {
-      const rows = prepared.get(table.name);
-      if (!rows || rows.length === 0) continue;
-      await (table as Table<unknown, string>).bulkPut(rows);
-      counts[table.name] = rows.length;
+      if (table.name === 'books' || table.name === 'bookContent') continue;
+      const rows = prepared.get(table.name) ?? [];
+      if (rows.length === 0) continue;
+      if (mode === 'replace') {
+        await replaceRows(table as Table<unknown, string>, rows, counts, skipped, collisions);
+      } else {
+        await mergeRows(table as Table<unknown, string>, rows, counts, skipped, collisions);
+      }
+    }
+
+    const contentRows = prepared.get('bookContent') ?? [];
+    if (contentRows.length === 0) return;
+    const contentTable = db.bookContent as Table<unknown, string>;
+    if (mode === 'replace') {
+      await replaceContentRows(
+        contentTable,
+        contentRows,
+        writtenBooks.insertedKeys,
+        counts,
+        skipped,
+        collisions,
+      );
+    } else {
+      await mergeContentRows(
+        bookTable,
+        contentTable,
+        contentRows,
+        writtenBooks.insertedKeys,
+        incomingBookIds,
+        counts,
+        skipped,
+        collisions,
+      );
     }
   });
 
-  return { mode, counts, missingFile };
+  // The transaction promise resolves only after commit. A failed restore leaves
+  // both the rows and the memoised audio size exactly as they were.
+  if (mode === 'replace') resetAudioSizeCache();
+  return { mode, counts, skipped, collisions, missingFile, audioCleared: mode === 'replace' };
+}
+
+interface WrittenRows {
+  insertedKeys: Set<string>;
+  rows: unknown[];
+}
+
+interface UniqueRows {
+  rows: Map<string, unknown>;
+  duplicateCount: number;
+}
+
+/** The validated tables all use a single string primary key. */
+function rowKey(table: Table<unknown, string>, row: unknown): string {
+  const keyPath = table.schema.primKey.keyPath;
+  if (typeof keyPath !== 'string') throw new Error('This backup uses an unsupported primary key.');
+  const key = (row as Record<string, unknown>)[keyPath];
+  if (typeof key !== 'string') throw new Error('This backup contains a row without a valid id.');
+  return key;
+}
+
+/** Keep the first incoming row for an id, but retain duplicates for the report. */
+function uniqueRows(table: Table<unknown, string>, rows: unknown[]): UniqueRows {
+  const unique = new Map<string, unknown>();
+  let duplicateCount = 0;
+  for (const row of rows) {
+    const key = rowKey(table, row);
+    if (unique.has(key)) duplicateCount++;
+    else unique.set(key, row);
+  }
+  return { rows: unique, duplicateCount };
+}
+
+function addCount(target: Record<string, number>, table: string, count: number): void {
+  if (count > 0) target[table] = (target[table] ?? 0) + count;
+}
+
+/** Add only absent keys; an existing local row always wins, regardless of age. */
+async function mergeRows(
+  table: Table<unknown, string>,
+  rows: unknown[],
+  counts: Record<string, number>,
+  skipped: Record<string, number>,
+  collisions: Record<string, number>,
+): Promise<WrittenRows> {
+  const unique = uniqueRows(table, rows);
+  const existingKeys = new Set<string>();
+  for (const row of await table.bulkGet([...unique.rows.keys()])) {
+    if (row !== undefined) existingKeys.add(rowKey(table, row));
+  }
+  const absent = [...unique.rows].filter(([key]) => !existingKeys.has(key));
+  if (absent.length) await table.bulkAdd(absent.map(([, row]) => row));
+
+  counts[table.name] = absent.length;
+  addCount(skipped, table.name, rows.length - absent.length);
+  addCount(collisions, table.name, unique.duplicateCount + existingKeys.size);
+  return { insertedKeys: new Set(absent.map(([key]) => key)), rows: absent.map(([, row]) => row) };
+}
+
+/** Replace still overwrites local keys; repeated incoming ids resolve first-wins. */
+async function replaceRows(
+  table: Table<unknown, string>,
+  rows: unknown[],
+  counts: Record<string, number>,
+  skipped: Record<string, number>,
+  collisions: Record<string, number>,
+): Promise<WrittenRows> {
+  const unique = uniqueRows(table, rows);
+  if (unique.rows.size) await table.bulkPut([...unique.rows.values()]);
+  counts[table.name] = unique.rows.size;
+  addCount(skipped, table.name, unique.duplicateCount);
+  addCount(collisions, table.name, unique.duplicateCount);
+  return { insertedKeys: new Set(unique.rows.keys()), rows: [...unique.rows.values()] };
+}
+
+/**
+ * Content belongs to its book. Merge may add it only beside a book that was
+ * actually inserted; a local book keeps both its metadata and its document.
+ * A content row with no incoming/local book is an orphan and is left out.
+ */
+async function mergeContentRows(
+  bookTable: Table<unknown, string>,
+  table: Table<unknown, string>,
+  rows: unknown[],
+  insertedBookIds: Set<string>,
+  incomingBookIds: Set<string>,
+  counts: Record<string, number>,
+  skipped: Record<string, number>,
+  collisions: Record<string, number>,
+): Promise<void> {
+  const unique = uniqueRows(table, rows);
+  const contentIds = [...unique.rows.keys()];
+  const existingKeys = new Set<string>();
+  for (const row of await table.bulkGet(contentIds)) {
+    if (row !== undefined) existingKeys.add(rowKey(table, row));
+  }
+  // A content-only archive must not attach itself to a book already here. Look
+  // up the aggregate owner inside this same transaction, not before it opens.
+  const existingBookIds = new Set<string>();
+  for (const row of await bookTable.bulkGet(contentIds)) {
+    if (row !== undefined) existingBookIds.add(rowKey(bookTable, row));
+  }
+
+  const absent: unknown[] = [];
+  let collisionRows = 0;
+  for (const [id, row] of unique.rows) {
+    const blockedByBook = !insertedBookIds.has(id);
+    const aggregateCollision = blockedByBook && (incomingBookIds.has(id) || existingBookIds.has(id));
+    const keyCollision = existingKeys.has(id);
+    if (aggregateCollision || keyCollision) collisionRows++;
+    if (!blockedByBook && !keyCollision) absent.push(row);
+  }
+  if (absent.length) await table.bulkAdd(absent);
+
+  counts[table.name] = absent.length;
+  addCount(skipped, table.name, rows.length - absent.length);
+  addCount(collisions, table.name, unique.duplicateCount + collisionRows);
+}
+
+/** Replace writes content only for books in the same archive, never orphans. */
+async function replaceContentRows(
+  table: Table<unknown, string>,
+  rows: unknown[],
+  writtenBookIds: Set<string>,
+  counts: Record<string, number>,
+  skipped: Record<string, number>,
+  collisions: Record<string, number>,
+): Promise<void> {
+  const unique = uniqueRows(table, rows);
+  const accepted = [...unique.rows].filter(([id]) => writtenBookIds.has(id));
+  if (accepted.length) await table.bulkPut(accepted.map(([, row]) => row));
+  counts[table.name] = accepted.length;
+  addCount(skipped, table.name, rows.length - accepted.length);
+  addCount(collisions, table.name, unique.duplicateCount);
 }
 
 function stripFileBlob(book: unknown): unknown {
@@ -332,6 +531,7 @@ async function attachBookFiles(
   rows: Omit<BookRecord, 'fileBlob'>[],
   files: Unzipped,
   missing: string[],
+  mode: ImportMode,
 ): Promise<BookRecord[]> {
   const books: BookRecord[] = [];
   for (const record of rows) {
@@ -343,10 +543,10 @@ async function attachBookFiles(
       // The Blob keeps its own copy of the bytes, and the unzipped entry is dead
       // weight now: dropping it here means a library is never in memory twice.
       delete files[name];
-    } else {
-      // A device that already has the book keeps its local file, in a replace
-      // too: a notes-only backup must never cost the reader her PDF. This runs
-      // before the replace transaction clears the table.
+    } else if (mode === 'replace') {
+      // Replace overwrites the row, so retain a local file when this is a
+      // notes-only restore. Merge never needs it: an existing id loses the
+      // collision, and an absent id cannot already have a file.
       const existing = await db.books.get(record.id);
       if (existing?.fileBlob instanceof Blob) {
         fileBlob = existing.fileBlob;
@@ -354,6 +554,9 @@ async function attachBookFiles(
         fileBlob = new Blob([]);
         missing.push(record.id);
       }
+    } else {
+      fileBlob = new Blob([]);
+      missing.push(record.id);
     }
     books.push({ ...record, fileBlob });
   }
@@ -362,7 +565,10 @@ async function attachBookFiles(
 
 /** A book file may only ship with the book record it belongs to. */
 function checkBookFiles(files: Unzipped, books: Omit<BookRecord, 'fileBlob'>[]): void {
-  const byId = new Map(books.map((book) => [book.id, book]));
+  const byId = new Map<string, Omit<BookRecord, 'fileBlob'>>();
+  // Duplicate incoming ids resolve first-wins in the transaction; validate the
+  // accompanying file against that same record.
+  for (const book of books) if (!byId.has(book.id)) byId.set(book.id, book);
   for (const name of Object.keys(files)) {
     const match = BOOK_FILE_RE.exec(name);
     if (!match) continue;
@@ -493,7 +699,6 @@ async function readPayload(files: Unzipped, tables: Table[]): Promise<Map<string
       throw new Error(`This backup is too large: "${table.name}" has more than ${MAX_ROWS} records.`);
     }
     let rows = raw.map((row) => validateRow(table.name, row)).filter((row) => row !== undefined);
-    if (table.name === 'books') checkDuplicateBooks(rows);
     if (table.name === 'settings') rows = rows.filter((row) => !isPrivateSetting(row as Setting));
     payload.set(table.name, rows as unknown[]);
   }
@@ -522,22 +727,29 @@ function readContentRows(files: Unzipped): StoredContent[] {
   if (!Array.isArray(parsed)) return [];
 
   const rows: StoredContent[] = [];
-  const seen = new Set<string>();
+  const consumed = new Set<string>();
+  const bytesById = new Map<string, ArrayBuffer>();
   for (const item of parsed) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const entry = item as { id?: unknown; codec?: unknown };
     const id = typeof entry.id === 'string' && ID_RE.test(entry.id) && !entry.id.includes('..') ? entry.id : null;
-    if (!id || seen.has(id)) continue;
+    if (!id) continue;
     const codec = entry.codec;
     if (codec !== 'deflate-raw' && codec !== 'none') continue;
     const key = `content/${id}.bin`;
     const bytes = files[key];
     if (!bytes || bytes.byteLength > MAX_JSON_BYTES) continue;
-    delete files[key];
-    seen.add(id);
+    consumed.add(key);
     // A fresh ArrayBuffer: fflate may hand back a view into a larger buffer.
-    rows.push({ id, codec, bytes: new Uint8Array(bytes).buffer });
+    // Repeated ids share that copy; only the first row is eventually written.
+    let storedBytes = bytesById.get(id);
+    if (!storedBytes) {
+      storedBytes = new Uint8Array(bytes).buffer;
+      bytesById.set(id, storedBytes);
+    }
+    rows.push({ id, codec, bytes: storedBytes });
   }
+  for (const key of consumed) delete files[key];
   return rows;
 }
 
@@ -573,16 +785,6 @@ function readBookRows(files: Unzipped): unknown[] {
     rows.push(parsed);
   }
   return rows;
-}
-
-/** Two book files for one id would silently drop one of them on write. */
-function checkDuplicateBooks(rows: unknown[]): void {
-  const seen = new Set<string>();
-  for (const row of rows) {
-    const id = (row as { id: string }).id;
-    if (seen.has(id)) throw new Error(`This backup is damaged: book "${id}" appears more than once.`);
-    seen.add(id);
-  }
 }
 
 function readTable(files: Unzipped, name: string): unknown[] | undefined {

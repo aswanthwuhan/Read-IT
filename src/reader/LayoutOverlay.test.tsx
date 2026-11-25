@@ -61,6 +61,16 @@ function boxes(): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>('[data-block-id]'));
 }
 
+function smallChoice(blockId: string): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(`[data-small-block-id="${blockId}"]`);
+}
+
+function choice(blockId: string): HTMLButtonElement | null {
+  return (
+    container.querySelector<HTMLButtonElement>(`button[data-block-id="${blockId}"]`) ?? smallChoice(blockId)
+  );
+}
+
 function orderOf(blockId: string): string | null {
   return container.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`)?.dataset.order ?? null;
 }
@@ -148,27 +158,43 @@ describe('LayoutOverlay fix mode', () => {
     await click(button('Fix order'));
   }
 
-  it('turns every block into a labelled tap target', async () => {
+  it('keeps tiny outlines visual and gives each one a labelled full-size button', async () => {
     await startFixing();
-    expect(boxes().map((box) => box.tagName)).toEqual(['BUTTON', 'BUTTON', 'BUTTON']);
-    expect(container.querySelector<HTMLElement>('[data-block-id="a"]')?.getAttribute('aria-label')).toBe(
-      'Body text block, not tapped yet'
-    );
+    expect(boxes().map((box) => box.tagName)).toEqual(['DIV', 'DIV', 'DIV']);
+    expect(boxes().every((box) => box.getAttribute('aria-hidden') === 'true')).toBe(true);
+    expect(smallChoice('a')?.getAttribute('aria-label')).toBe('Body text block, not tapped yet');
     // Untapped blocks carry no number yet.
     expect(orderOf('a')).toBeNull();
-    // "Fix order" unmounted with the mode change, so focus has to land on the
-    // first block instead of falling back to the document.
-    expect(document.activeElement).toBe(boxes()[0]);
+    // The 10px-high outline keeps its geometry; the equivalent list button is
+    // what receives focus when the tiny outline cannot be a usable target.
+    expect(boxes()[0]?.style.height).toBe('10px');
+    expect(document.activeElement).toBe(smallChoice('a'));
+  });
+
+  it('keeps a large block as its own on-page target and lists only tiny alternatives', async () => {
+    const mixed = [
+      pageBlock('large', 1, 'p', { x: 10, y: 10, w: 90, h: 60 }),
+      pageBlock('tiny', 2, 'h', { x: 10, y: 80, w: 90, h: 10 }),
+    ];
+    await renderOverlay(mixed);
+    await click(button('Fix order'));
+
+    expect(container.querySelector('[data-block-id="large"]')?.tagName).toBe('BUTTON');
+    expect(container.querySelector('[data-block-id="tiny"]')?.tagName).toBe('DIV');
+    expect(container.querySelectorAll('[data-small-block-id]')).toHaveLength(1);
+    expect(document.activeElement).toBe(container.querySelector('[data-block-id="large"]'));
+    await click(smallChoice('tiny'));
+    expect(orderOf('tiny')).toBe('1');
   });
 
   it('numbers the blocks in the order they are tapped', async () => {
     await startFixing();
-    const target = (id: string): HTMLElement | null => container.querySelector<HTMLElement>(`[data-block-id="${id}"]`);
+    const target = choice;
 
     await click(target('c'));
     await click(target('a'));
     expect([orderOf('c'), orderOf('a'), orderOf('b')]).toEqual(['1', '2', null]);
-    expect(container.querySelector<HTMLElement>('[data-block-id="a"]')?.getAttribute('aria-label')).toBe(
+    expect(smallChoice('a')?.getAttribute('aria-label')).toBe(
       'Body text block, position 2 in the new order'
     );
     expect(container.textContent).toContain('2 of 3 tapped — the rest follow in their current order.');
@@ -180,13 +206,13 @@ describe('LayoutOverlay fix mode', () => {
   it('keeps Save off until something is tapped', async () => {
     await startFixing();
     expect(button('Save').disabled).toBe(true);
-    await click(container.querySelector('[data-block-id="b"]'));
+    await click(choice('b'));
     expect(button('Save').disabled).toBe(false);
   });
 
   it('undoes the last tap, one at a time', async () => {
     await startFixing();
-    const target = (id: string): HTMLElement | null => container.querySelector<HTMLElement>(`[data-block-id="${id}"]`);
+    const target = choice;
     await click(target('b'));
     await click(target('c'));
     await click(button('Undo last'));
@@ -200,7 +226,7 @@ describe('LayoutOverlay fix mode', () => {
   it('cancel drops the taps and leaves the order alone', async () => {
     const onSave = vi.fn(async () => undefined);
     await startFixing(onSave);
-    await click(container.querySelector('[data-block-id="c"]'));
+    await click(choice('c'));
     await click(button('Cancel'));
 
     expect(onSave).not.toHaveBeenCalled();
@@ -217,8 +243,8 @@ describe('LayoutOverlay fix mode', () => {
   it('saves the tapped ids first and the rest in their current order', async () => {
     const onSave = vi.fn(async () => undefined);
     await startFixing(onSave);
-    await click(container.querySelector('[data-block-id="c"]'));
-    await click(container.querySelector('[data-block-id="b"]'));
+    await click(choice('c'));
+    await click(choice('b'));
     await click(button('Save'));
 
     expect(onSave).toHaveBeenCalledWith(['c', 'b', 'a']);
@@ -229,9 +255,9 @@ describe('LayoutOverlay fix mode', () => {
   it('saves an order for every block once the last one is tapped', async () => {
     const onSave = vi.fn(async () => undefined);
     await startFixing(onSave);
-    await click(container.querySelector('[data-block-id="b"]'));
-    await click(container.querySelector('[data-block-id="a"]'));
-    await click(container.querySelector('[data-block-id="c"]'));
+    await click(choice('b'));
+    await click(choice('a'));
+    await click(choice('c'));
     await click(button('Save'));
 
     expect(onSave).toHaveBeenCalledWith(['b', 'a', 'c']);
@@ -243,7 +269,7 @@ describe('LayoutOverlay fix mode', () => {
     });
     await renderOverlay(THREE, onSave);
     await click(button('Fix order'));
-    await click(container.querySelector('[data-block-id="b"]'));
+    await click(choice('b'));
     await click(button('Save'));
 
     await waitFor(() => (container.textContent ?? '').includes('Could not save the order.'), 'the error message');
@@ -253,7 +279,7 @@ describe('LayoutOverlay fix mode', () => {
 
   it('starts over on another page', async () => {
     await startFixing();
-    await click(container.querySelector('[data-block-id="b"]'));
+    await click(choice('b'));
     await rerenderOverlay([pageBlock('d', 1)], async () => undefined);
 
     expect(container.querySelectorAll('button')).toHaveLength(1);

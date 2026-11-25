@@ -1,13 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../core/db';
-import { ARTICLE_HTML_MAX_BYTES } from './limits';
+import { cacheSizeBytes, resetAudioSizeCache } from '../tts/cache';
+import { ARTICLE_HTML_MAX_BYTES, MAX_BYTES_BY_FORMAT, PASTE_MAX_CHARS, PDF_IMPORT_MAX_BYTES, TEXT_IMPORT_MAX_BYTES, TITLE_MAX_CHARS } from './limits';
 
 const h = vi.hoisted(() => ({ native: { value: false } }));
+const parseDocx = vi.hoisted(() => vi.fn());
+const parseEpub = vi.hoisted(() => vi.fn());
+const parsePdf = vi.hoisted(() => vi.fn());
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: () => h.native.value },
   CapacitorHttp: { get: vi.fn() },
 }));
+
+vi.mock('./docx', () => ({ parseDocx }));
+vi.mock('./epub', () => ({ parseEpub }));
+vi.mock('./pdf', () => ({ parsePdf }));
 
 const {
   IOS_IMPORT_LIMIT_BYTES,
@@ -29,7 +37,11 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  parseDocx.mockReset();
+  parseEpub.mockReset();
+  parsePdf.mockReset();
   h.native.value = false;
+  resetAudioSizeCache();
   await db.delete();
   await db.open();
 });
@@ -80,6 +92,12 @@ describe('importText', () => {
     expect(blocks.map((block) => block.id)).toEqual(['b-0-0', 'b-0-1']);
     expect(blocks[0]?.sentences.map((sentence) => sentence.id)).toEqual(['0-0-0', '0-0-1']);
     expect(blocks[1]?.sentences[0]?.text).toBe('Another paragraph.');
+    expect(await db.bookSummaries.get(bookId)).toMatchObject({
+      id: bookId,
+      title: 'Pasted notes',
+      chapterCount: 1,
+      sentenceCount: 3,
+    });
   });
 
   it('uses a fallback title when none is given', async () => {
@@ -89,6 +107,43 @@ describe('importText', () => {
 
   it('refuses empty text', async () => {
     await expect(importText('Title', '   \n\n ')).rejects.toThrow(/empty/i);
+  });
+
+  it('checks the paste limit before trimming or normalising', async () => {
+    await expect(importText('Title', ' '.repeat(PASTE_MAX_CHARS + 1))).rejects.toThrow(/pasted text is too long/i);
+    expect(await db.books.count()).toBe(0);
+  });
+
+  it('accepts text exactly at the paste limit', async () => {
+    // Whitespace reaches the empty-text check, proving the length boundary itself passed.
+    await expect(importText('Title', ' '.repeat(PASTE_MAX_CHARS))).rejects.toThrow(/empty/i);
+    expect(await db.books.count()).toBe(0);
+  });
+
+  it('rejects an overlong raw title but accepts one exactly at the limit', async () => {
+    await expect(importText(' '.repeat(TITLE_MAX_CHARS + 1), 'Body.')).rejects.toThrow(/title is too long/i);
+    expect(await db.books.count()).toBe(0);
+
+    const title = 'x'.repeat(TITLE_MAX_CHARS);
+    const id = await importText(title, 'Body.');
+    expect((await db.books.get(id))?.title).toBe(title);
+  });
+
+  it('slices the raw first line before normalising it into a fallback title', async () => {
+    const id = await importText('', `${' '.repeat(80)}Chapter title\nBody text.`);
+    expect((await db.books.get(id))?.title).toBe('Pasted text');
+  });
+
+  it('does no work when its signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const add = vi.spyOn(db.books, 'add');
+
+    await expect(importText('Title', 'Body.', { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(add).not.toHaveBeenCalled();
+    expect(await db.books.count()).toBe(0);
   });
 });
 
@@ -137,6 +192,51 @@ describe('importFile', () => {
 
     expect(first).not.toBe(second);
     expect(await db.books.count()).toBe(2);
+  });
+
+  it('threads the import AbortSignal into EPUB parsing', async () => {
+    const controller = new AbortController();
+    const parsed = parseText('A readable EPUB sentence.', 'Stored EPUB title');
+    parseEpub.mockResolvedValue(parsed);
+    const file = new File([new Uint8Array([1, 2, 3])], 'signal-book.epub', { type: 'application/epub+zip' });
+
+    const bookId = await importFile(file, { signal: controller.signal });
+
+    expect(parseEpub).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'signal book', controller.signal);
+    expect((await db.books.get(bookId))?.parsed).toEqual(parsed);
+  });
+
+  it('threads the import AbortSignal into PDF parsing', async () => {
+    const controller = new AbortController();
+    const parsed = { ...parseText('A readable PDF sentence.', 'Stored PDF title'), format: 'pdf' as const };
+    parsePdf.mockResolvedValue({ doc: parsed, charsPerPage: 100, pageCount: 1, layout: 'heuristic' });
+    const file = new File([new Uint8Array([1, 2, 3])], 'signal-book.pdf', { type: 'application/pdf' });
+
+    const bookId = await importFile(file, { signal: controller.signal, pdfLayout: 'heuristic' });
+
+    expect(parsePdf).toHaveBeenCalledWith(
+      expect.any(ArrayBuffer),
+      'signal book',
+      expect.any(Function),
+      { layout: 'heuristic', signal: controller.signal },
+    );
+    expect((await db.books.get(bookId))?.parsed).toEqual(parsed);
+  });
+
+  it('threads the import AbortSignal into DOCX ZIP validation', async () => {
+    const controller = new AbortController();
+    const parsed = { ...parseText('A readable DOCX sentence.', 'Stored DOCX title'), format: 'docx' as const };
+    parseDocx.mockResolvedValue(parsed);
+    const file = new File(
+      [new Uint8Array([1, 2, 3])],
+      'signal-book.docx',
+      { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+    );
+
+    const bookId = await importFile(file, { signal: controller.signal });
+
+    expect(parseDocx).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'signal book', { signal: controller.signal });
+    expect((await db.books.get(bookId))?.parsed).toEqual(parsed);
   });
 });
 
@@ -203,6 +303,26 @@ describe('the imported file is owned by the app, not by the picker', () => {
     await expect(reanalyseBook('gone')).rejects.toThrow(MISSING_FILE_MESSAGE);
     expect(MISSING_FILE_MESSAGE).toContain('re-import it to use Page view and Re-analyse');
   });
+
+  it('rejects an oversized stored PDF before re-analysis reads it', async () => {
+    const file = new Blob(['%PDF-1.4'], { type: 'application/pdf' });
+    Object.defineProperty(file, 'size', { value: PDF_IMPORT_MAX_BYTES + 1 });
+    const parsed = { ...parseText('Readable sentence.', 'Paper'), format: 'pdf' as const };
+    vi.spyOn(db.books, 'get').mockResolvedValue({
+      id: 'large',
+      title: 'Paper',
+      format: 'pdf',
+      addedAt: 1,
+      fileBlob: file,
+      parsed,
+    });
+    const read = vi.spyOn(file, 'arrayBuffer');
+    const update = vi.spyOn(db.books, 'update');
+
+    await expect(reanalyseBook('large')).rejects.toThrow(/PDF file is too large/);
+    expect(read).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
 });
 
 describe('the iOS import size guard', () => {
@@ -227,18 +347,78 @@ describe('the iOS import size guard', () => {
     expect(await db.books.count()).toBe(0);
   });
 
-  it('lets a desktop browser import the same file', async () => {
+  it('applies the lower per-format caps on desktop too', async () => {
     vi.stubGlobal('navigator', {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       platform: 'Win32',
       maxTouchPoints: 0,
     });
     const file = hugeFile();
+    const read = vi.spyOn(file, 'arrayBuffer');
 
-    // Desktop browsers page their IndexedDB blobs to disk; the limit is iOS-only.
+    await expect(importFileDetailed(file)).rejects.toThrow(/TXT file is too large/);
+    expect(read).not.toHaveBeenCalled();
+    expect(await db.books.count()).toBe(0);
+  });
+});
+
+describe('per-format import bounds', () => {
+  function fileWithSize(format: keyof typeof MAX_BYTES_BY_FORMAT, size: number): File {
+    const file = new File(['Readable sentence.'], `book.${format}`, { type: `application/${format}` });
+    Object.defineProperty(file, 'size', { value: size });
+    return file;
+  }
+
+  it.each(Object.entries(MAX_BYTES_BY_FORMAT) as [keyof typeof MAX_BYTES_BY_FORMAT, number][])(
+    'rejects an oversized %s before reading or writing',
+    async (format, cap) => {
+      const file = fileWithSize(format, cap + 1);
+      const read = vi.spyOn(file, 'arrayBuffer');
+      const add = vi.spyOn(db.books, 'add');
+
+      await expect(importFileDetailed(file)).rejects.toThrow(new RegExp(`${format.toUpperCase()} file is too large`));
+      expect(read).not.toHaveBeenCalled();
+      expect(add).not.toHaveBeenCalled();
+      expect(await db.books.count()).toBe(0);
+    },
+  );
+
+  it('imports a file exactly at its byte cap', async () => {
+    const file = fileWithSize('txt', TEXT_IMPORT_MAX_BYTES);
+    const read = vi.spyOn(file, 'arrayBuffer');
+
     const { bookId } = await importFileDetailed(file);
-    expect(bookId).toBeTruthy();
+
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(await db.books.get(bookId)).toBeTruthy();
     expect(await db.books.count()).toBe(1);
+  });
+
+  it('does not read or write when the file signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const file = fileWithSize('txt', 100);
+    const read = vi.spyOn(file, 'arrayBuffer');
+    const add = vi.spyOn(db.books, 'add');
+
+    await expect(importFile(file, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(read).not.toHaveBeenCalled();
+    expect(add).not.toHaveBeenCalled();
+    expect(await db.books.count()).toBe(0);
+  });
+
+  it('checks the signal again after the owned copy finishes reading', async () => {
+    const controller = new AbortController();
+    const file = fileWithSize('txt', 100);
+    vi.spyOn(file, 'arrayBuffer').mockImplementation(async () => {
+      controller.abort();
+      return new ArrayBuffer(0);
+    });
+    const add = vi.spyOn(db.books, 'add');
+
+    await expect(importFile(file, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(add).not.toHaveBeenCalled();
+    expect(await db.books.count()).toBe(0);
   });
 });
 
@@ -260,10 +440,40 @@ describe('deleteBook', () => {
 
     expect(await db.books.get(drop)).toBeUndefined();
     expect(await db.books.get(keep)).toBeTruthy();
+    expect(await db.bookSummaries.get(drop)).toBeUndefined();
+    expect(await db.bookSummaries.get(keep)).toBeTruthy();
     expect(await db.highlights.where('bookId').equals(drop).count()).toBe(0);
     expect(await db.bookmarks.where('bookId').equals(drop).count()).toBe(0);
     expect(await db.highlights.where('bookId').equals(keep).count()).toBe(1);
     expect(await db.bookmarks.where('bookId').equals(keep).count()).toBe(1);
+  });
+
+  it('deletes a book\'s indexed audio clips without reading unrelated blobs', async () => {
+    const drop = await importText('Drop', 'Dropped book text.');
+    const keep = await importText('Keep', 'Kept book text.');
+    await db.audioCache.bulkAdd([
+      { key: 'audio-drop', engine: 'system', audio: { size: 3 } as Blob, durationMs: 1, createdAt: 1, bookId: drop },
+      { key: 'audio-keep', engine: 'system', audio: { size: 5 } as Blob, durationMs: 1, createdAt: 2, bookId: keep },
+    ]);
+    resetAudioSizeCache();
+    expect(await cacheSizeBytes()).toBe(8);
+
+    const reads: string[] = [];
+    let watching = true;
+    db.audioCache.hook('reading', (record) => {
+      if (watching) reads.push(record.key);
+      return record;
+    });
+    try {
+      await deleteBook(drop);
+    } finally {
+      watching = false;
+    }
+
+    expect(reads).not.toContain('audio-keep');
+    expect(await db.audioCache.get('audio-drop')).toBeUndefined();
+    expect(await db.audioCache.get('audio-keep')).toBeTruthy();
+    expect(await cacheSizeBytes()).toBe(5);
   });
 });
 

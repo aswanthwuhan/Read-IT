@@ -7,8 +7,9 @@
  * writes the engine choice only after the download reports `done`. Closing the sheet
  * never cancels the download: the state lives in `downloads.ts`, outside React.
  */
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { pushBackHandler } from '../core/backButton';
+import { useFocusGuard } from '../core/focusGuard';
 import { isIos } from '../core/platform';
 import { setSetting } from '../core/settings';
 import { useDownload } from '../tts/downloads';
@@ -27,8 +28,6 @@ export interface VoicePromptProps {
   open: boolean;
   /** Removes the sheet. Never cancels a running download. */
   onClose: () => void;
-  /** Where the sheet was opened from; kept for the prompt-once bookkeeping done by the opener. */
-  source?: 'pill' | 'banner' | 'auto';
 }
 
 export default function VoicePrompt({ open, onClose }: VoicePromptProps) {
@@ -40,78 +39,82 @@ export default function VoicePrompt({ open, onClose }: VoicePromptProps) {
   const download = useDownload('kokoro');
   /** A download was started from this sheet; without it a stale `done` would switch voices. */
   const [attempted, setAttempted] = useState(false);
-  const [switched, setSwitched] = useState(false);
+  const [switchState, setSwitchState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const switchStateRef = useRef(switchState);
+  switchStateRef.current = switchState;
+  const switchInFlight = useRef(false);
+  const openRef = useRef(open);
+  openRef.current = open;
+  const switched = switchState === 'saved';
+  const saving = switchState === 'saving';
 
-  const close = () => closeRef.current();
+  const close = () => {
+    // A voice change must settle before the sheet can disappear, so a failed
+    // write has somewhere visible to explain itself.
+    if (switchStateRef.current === 'saving') return;
+    closeRef.current();
+  };
   const closeFnRef = useRef(close);
   closeFnRef.current = close;
+  useFocusGuard({
+    active: open,
+    mode: 'modal',
+    containerRef: sheetRef,
+    initialFocusRef: startRef,
+    onEscape: () => closeFnRef.current(),
+  });
 
   const busy = download.status === 'downloading' || download.status === 'unpacking';
   const done = download.status === 'done';
   const failed = download.status === 'error';
 
-  // Focus and the Android back key belong to the sheet while it is open.
+  const selectKokoro = useCallback(async (): Promise<boolean> => {
+    if (switchInFlight.current) return false;
+    switchInFlight.current = true;
+    switchStateRef.current = 'saving';
+    setSwitchState('saving');
+    try {
+      await setSetting(ENGINE_SETTING, 'kokoro');
+      if (!openRef.current) return false;
+      switchStateRef.current = 'saved';
+      setSwitchState('saved');
+      return true;
+    } catch {
+      if (openRef.current) {
+        switchStateRef.current = 'error';
+        setSwitchState('error');
+      }
+      return false;
+    } finally {
+      switchInFlight.current = false;
+    }
+  }, []);
+
+  // The Android back key belongs to the sheet while it is open. Keep this
+  // registration separate so newer sheets/popovers remain above it in the stack.
   useEffect(() => {
     if (!open) return;
-    const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    startRef.current?.focus();
-
-    function focusables(): HTMLElement[] {
-      const root = sheetRef.current;
-      if (!root) return [];
-      return Array.from(
-        root.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-      );
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeFnRef.current();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const items = focusables();
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener('keydown', onKeyDown);
     const dispose = pushBackHandler(() => {
       closeFnRef.current();
       return true;
     });
 
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      dispose();
-      if (returnTo && document.contains(returnTo)) returnTo.focus();
-    };
+    return dispose;
   }, [open]);
 
-  // A finished download becomes the reading voice, and the sheet says so before closing.
+  // A finished download becomes the reading voice, and the sheet says so only
+  // after the choice has been stored.
   useEffect(() => {
-    if (!open || !attempted || !done || switched) return;
-    setSwitched(true);
-    void setSetting(ENGINE_SETTING, 'kokoro').catch(() => undefined);
-  }, [open, attempted, done, switched]);
+    if (!open || !attempted || !done || switchState !== 'idle') return;
+    void selectKokoro();
+  }, [open, attempted, done, switchState, selectKokoro]);
 
-  // A closed sheet forgets the success, so opening it again later offers the normal
-  // state instead of a stale "ready" message. A download still running keeps its
-  // attempt, so finishing while the sheet is closed still switches the voice.
+  // A closed sheet forgets its attempt once the download is no longer running,
+  // so reopening offers the normal state instead of stale progress or success.
   useEffect(() => {
     if (open) return;
-    setSwitched(false);
+    switchStateRef.current = 'idle';
+    setSwitchState('idle');
     if (download.status !== 'downloading' && download.status !== 'unpacking') {
       setAttempted(false);
     }
@@ -141,13 +144,13 @@ export default function VoicePrompt({ open, onClose }: VoicePromptProps) {
 
   const start = () => {
     setAttempted(true);
-    setSwitched(false);
+    switchStateRef.current = 'idle';
+    setSwitchState('idle');
     void startKokoroDownload();
   };
 
-  const useDownloaded = () => {
-    void setSetting(ENGINE_SETTING, 'kokoro').catch(() => undefined);
-    close();
+  const useDownloaded = async (): Promise<void> => {
+    if (await selectKokoro()) close();
   };
 
   return (
@@ -159,6 +162,8 @@ export default function VoicePrompt({ open, onClose }: VoicePromptProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-busy={saving}
+        tabIndex={-1}
       >
         <h2 id={titleId} className="sheet-title">
           Kokoro, the natural voice
@@ -170,12 +175,18 @@ export default function VoicePrompt({ open, onClose }: VoicePromptProps) {
               Kokoro is ready. It will read from here.
             </p>
           ) : done ? (
-            <>
+            saving ? (
               <p className="voice-prompt-status" role="status">
-                Kokoro is already downloaded on this device.
+                Selecting Kokoro…
               </p>
-              <p className="voice-prompt-note">You can start reading with it straight away.</p>
-            </>
+            ) : (
+              <>
+                <p className="voice-prompt-status" role="status">
+                  Kokoro is already downloaded on this device.
+                </p>
+                <p className="voice-prompt-note">You can start reading with it straight away.</p>
+              </>
+            )
           ) : failed ? (
             <>
               <p className="voice-prompt-status" role="alert">
@@ -219,6 +230,11 @@ export default function VoicePrompt({ open, onClose }: VoicePromptProps) {
           {phoneVoiceWarning ? (
             <p className="voice-prompt-note voice-prompt-ios">{IOS_KOKORO_SHEET_LINE}</p>
           ) : null}
+          {switchState === 'error' ? (
+            <p className="voice-prompt-status" role="alert">
+              Couldn’t switch to Kokoro. Your reading voice hasn’t changed. Please try again.
+            </p>
+          ) : null}
         </div>
 
         <div className="sheet-actions voice-prompt-actions">
@@ -228,11 +244,17 @@ export default function VoicePrompt({ open, onClose }: VoicePromptProps) {
             </button>
           ) : done ? (
             <>
-              <button type="button" className="btn btn-secondary" onClick={close}>
+              <button type="button" className="btn btn-secondary" onClick={close} disabled={saving}>
                 Not now
               </button>
-              <button ref={startRef} type="button" className="btn btn-primary" onClick={useDownloaded}>
-                Use Kokoro
+              <button
+                ref={startRef}
+                type="button"
+                className="btn btn-primary"
+                onClick={useDownloaded}
+                disabled={saving}
+              >
+                {saving ? 'Selecting Kokoro…' : 'Use Kokoro'}
               </button>
             </>
           ) : failed ? (

@@ -1,15 +1,16 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { db } from '../core/db';
+import { listLibraryBooks, repairBookSummaries } from '../core/db';
 import { pushBackHandler } from '../core/backButton';
 import { getSetting, setSetting, useSetting } from '../core/settings';
-import type { BookRecord, ColumnMode } from '../core/types';
+import type { ColumnMode, DocFormat, LibraryBook } from '../core/types';
 import { checkForUpdate, dismissUpdate, type UpdateRelease } from '../core/updateCheck';
 import { APP_VERSION } from '../core/version';
 import { deleteBook, detectFormat, importFileDetailed, importText, importUrl, setBookColumns } from '../import';
 import { IMPORT_LAYOUT_KEY, canRunLayoutModel, layoutForChoice, type ImportLayoutChoice } from '../import/importLayout';
 import ImportLayoutSheet from '../import/ImportLayoutSheet';
+import { PASTE_MAX_CHARS, TITLE_MAX_CHARS } from '../import/limits';
 import { isLayoutModelReady } from '../import/layout/model';
 import type { LayoutMode } from '../import/pdf';
 import '../import/library.css';
@@ -24,7 +25,7 @@ const ACCEPT = '.pdf,.epub,.docx,.txt,.md,.markdown,.html,.htm,.xhtml';
 const BACKUP_DISMISS_KEY = 'backup.reminderDismissedAt';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-const FORMAT_LABEL: Record<BookRecord['format'], string> = {
+const FORMAT_LABEL: Record<DocFormat, string> = {
   pdf: 'PDF',
   epub: 'EPUB',
   docx: 'DOCX',
@@ -43,6 +44,9 @@ const COLUMN_OPTIONS: { value: ColumnMode; label: string }[] = [
 /** An import note, split so the banner can lead with the file it belongs to. */
 type Warning = { file: string; message: string; scanned: boolean };
 
+/** A failed action, so a delete failure is never labelled as an import failure. */
+type ErrorNotice = { action: 'import' | 'delete'; message: string };
+
 /** The reader's answer to the PDF import question. */
 type ImportAnswer = { choice: 'textbook' | 'simple'; remember: boolean; note?: string };
 
@@ -51,37 +55,6 @@ type ImportQuestion = { count: number; modelReady: boolean };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function readingProgress(book: BookRecord): number | null {
-  const position = book.lastPos;
-  if (!position) return null;
-
-  let total = 0;
-  for (const chapter of book.parsed.chapters) {
-    for (const block of chapter.blocks) total += block.sentences.length;
-  }
-  if (!total) return 0;
-
-  let seen = 0;
-  for (const chapter of book.parsed.chapters) {
-    if (chapter.id !== position.chapterId) {
-      for (const block of chapter.blocks) seen += block.sentences.length;
-      continue;
-    }
-    for (const block of chapter.blocks) {
-      for (const sentence of block.sentences) {
-        seen += 1;
-        if (sentence.id === position.sentenceId) return Math.round((seen / total) * 100);
-      }
-    }
-    break;
-  }
-  return null;
-}
-
-function chapterCount(book: BookRecord): number {
-  return book.parsed.chapters.length;
 }
 
 /* --- Icons -----------------------------------------------------------------
@@ -157,7 +130,7 @@ function BookActionsSheet({
   onCancel,
   onDelete,
 }: {
-  book: BookRecord;
+  book: LibraryBook;
   onCancel: () => void;
   onDelete: () => void;
 }) {
@@ -330,20 +303,14 @@ export default function LibraryPage() {
 
   // No default value: `undefined` means the first IndexedDB read is still in
   // flight, which the page shows as a loading state instead of "empty shelf".
-  const books = useLiveQuery(() => db.books.orderBy('addedAt').reverse().toArray(), []);
-
-  // Walking every sentence of every book is not free, and the page re-renders on
-  // each keystroke in the URL field: do it once per library change, not per render.
-  const progressById = useMemo(() => {
-    const map = new Map<string, number | null>();
-    for (const book of books ?? []) map.set(book.id, readingProgress(book));
-    return map;
-  }, [books]);
+  // The query reads only shelf summaries; normal renders never clone book blobs
+  // or parsed documents.
+  const books = useLiveQuery(() => listLibraryBooks(), []);
 
   const fileInput = useRef<HTMLInputElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
+  const [errors, setErrors] = useState<ErrorNotice[]>([]);
   const [warnings, setWarnings] = useState<Warning[]>([]);
   const [panel, setPanel] = useState<'none' | 'web' | 'text'>('none');
   // The PDF question an import is waiting on, and the promise that resumes it.
@@ -351,7 +318,7 @@ export default function LibraryPage() {
   const answerRef = useRef<((answer: ImportAnswer | null) => void) | null>(null);
   // The row whose "more" sheet is open, plus the button that opened it so focus
   // can come back to the same row when the sheet closes.
-  const [menuBook, setMenuBook] = useState<BookRecord | null>(null);
+  const [menuBook, setMenuBook] = useState<LibraryBook | null>(null);
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
   const [url, setUrl] = useState('');
   const [pasteTitle, setPasteTitle] = useState('');
@@ -362,6 +329,13 @@ export default function LibraryPage() {
   const busy = status !== null;
   const loading = books === undefined;
   const shelf = books ?? [];
+
+  // Legacy or interrupted writes can miss the derived index. Repair outside the
+  // live query (Dexie queries are read-only), one bounded batch per rerender.
+  useEffect(() => {
+    if (!books?.some((book) => book.unavailable)) return;
+    void repairBookSummaries().catch(() => undefined);
+  }, [books]);
 
   useEffect(() => {
     mounted.current = true;
@@ -515,11 +489,14 @@ export default function LibraryPage() {
           }
           if (mounted.current && files.length === 1 && !warning && !layoutNote) navigate(`/read/${result.bookId}`);
         } catch (error) {
-          setErrors((current) => [...current, `${file.name}: ${errorMessage(error)}`]);
+          setErrors((current) => [
+            ...current,
+            { action: 'import', message: `${file.name}: ${errorMessage(error)}` },
+          ]);
         }
       }
     } catch (error) {
-      setErrors([errorMessage(error)]);
+      setErrors([{ action: 'import', message: errorMessage(error) }]);
     } finally {
       finishImport();
     }
@@ -543,7 +520,7 @@ export default function LibraryPage() {
       setUrl('');
       if (mounted.current) navigate(`/read/${bookId}`);
     } catch (error) {
-      setErrors([errorMessage(error)]);
+      setErrors([{ action: 'import', message: errorMessage(error) }]);
     } finally {
       finishImport();
     }
@@ -562,24 +539,25 @@ export default function LibraryPage() {
       setPasteText('');
       if (mounted.current) navigate(`/read/${bookId}`);
     } catch (error) {
-      setErrors([errorMessage(error)]);
+      setErrors([{ action: 'import', message: errorMessage(error) }]);
     } finally {
       finishImport();
     }
   }
 
-  async function handleDelete(book: BookRecord) {
+  async function handleDelete(book: LibraryBook) {
+    setErrors([]);
     try {
       await deleteBook(book.id);
       // The row and its More button are gone, so returning focus there would
       // land on <body>. Start again from the page heading instead.
       titleRef.current?.focus();
     } catch (error) {
-      setErrors([`Could not delete “${book.title}”: ${errorMessage(error)}`]);
+      setErrors([{ action: 'delete', message: `Could not delete “${book.title}”: ${errorMessage(error)}` }]);
     }
   }
 
-  function openBookMenu(book: BookRecord, trigger: HTMLButtonElement): void {
+  function openBookMenu(book: LibraryBook, trigger: HTMLButtonElement): void {
     menuTrigger.current = trigger;
     setMenuBook(book);
   }
@@ -715,6 +693,7 @@ export default function LibraryPage() {
               type="text"
               placeholder="Optional — first line if empty"
               value={pasteTitle}
+              maxLength={TITLE_MAX_CHARS}
               onChange={(event) => setPasteTitle(event.target.value)}
             />
           </label>
@@ -725,6 +704,7 @@ export default function LibraryPage() {
               rows={8}
               placeholder="Paste an article, a chapter or your own notes…"
               value={pasteText}
+              maxLength={PASTE_MAX_CHARS}
               onChange={(event) => setPasteText(event.target.value)}
               required
             />
@@ -744,11 +724,11 @@ export default function LibraryPage() {
         </p>
       )}
 
-      {errors.map((message, index) => (
+      {errors.map(({ action, message }, index) => (
         <div className="banner banner-error" role="alert" key={`${index}-${message}`}>
           <WarningIcon />
           <div>
-            <p className="banner-title">Could not import</p>
+            <p className="banner-title">{action === 'delete' ? 'Could not delete book' : 'Could not import'}</p>
             <p>{message}</p>
           </div>
         </div>
@@ -800,45 +780,28 @@ export default function LibraryPage() {
           <ShelfMark />
           <h2>Your shelf is empty</h2>
           <p>
-            Read IT reads the books you already own. Import the PDFs, EPUBs and documents you want to read,
-            and they stay on this phone — no upload, no account, and everything works with the network off.
+            Import a PDF, EPUB or document to get started. Your files stay on this device, with no upload or account.
           </p>
-          <ol>
-            <li>
-              Tap <strong>Import</strong> and pick a file. PDF and EPUB are the usual ones; DOCX, TXT, Markdown and HTML
-              work too.
-            </li>
-            <li>
-              Add a voice once in <Link to="/settings#voice-models">Settings → On-device voice models</Link> and the reader can play
-              any chapter aloud, in your pocket, on the ward.
-            </li>
-            <li>
-              Tap a sentence to hear it from there. Select it to highlight it, and turn the highlight into a note.
-            </li>
-          </ol>
           <p className="lib-empty-note">
-            Image-only PDFs need a text layer added with OCR before you can import them.
+            Image-only PDFs are rejected. PDFs with very little selectable text can import with a warning; OCR is not supported yet.
           </p>
           <div className="empty-state-actions">
-            <button type="button" className="btn btn-primary" onClick={() => fileInput.current?.click()} disabled={busy}>
-              Import a file
-            </button>
             <Link className="btn btn-secondary" to="/settings#voice-models">
-              Settings
+              Choose a voice in Settings
             </Link>
           </div>
         </div>
       ) : (
         <ul className="lib-list">
           {shelf.map((book) => {
-            const progress = progressById.get(book.id) ?? null;
-            const chapters = chapterCount(book);
+            const progress = book.progress;
+            const chapters = book.chapterCount;
 
             return (
               <li className="lib-row" key={book.id} data-tour="book-row">
                 <Link className="lib-open" to={`/read/${book.id}`}>
                   <span className="lib-row-top">
-                    <span className="badge">{FORMAT_LABEL[book.format] ?? book.format.toUpperCase()}</span>
+                    <span className="badge">{book.format ? FORMAT_LABEL[book.format] : 'Book'}</span>
                     <span className="lib-title" title={book.title}>
                       {book.title}
                     </span>
@@ -855,8 +818,12 @@ export default function LibraryPage() {
                       </>
                     ) : null}
                     <span className="lib-facts">
-                      {chapters} {chapters === 1 ? 'chapter' : 'chapters'}
-                      {progress === null && <span className="lib-idle"> · Not started</span>}
+                      {chapters === null
+                        ? 'Details unavailable'
+                        : `${chapters} ${chapters === 1 ? 'chapter' : 'chapters'}`}
+                      {book.unavailable
+                        ? null
+                        : progress === null && <span className="lib-idle"> · Not started</span>}
                     </span>
                   </span>
                   {progress !== null && (

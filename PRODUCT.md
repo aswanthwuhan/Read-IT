@@ -38,10 +38,11 @@ how she gets there.
 
 ## Positioning
 
-Everything that makes the material *readable and listenable* runs on the device: text
-extraction, sentence segmentation, a pronunciation list, on-device voices, audio caching. No
-account, no server, no upload — a reader can finish a book in a basement with no signal, on a
-phone that is not the latest model.
+Read IT's text extraction, sentence segmentation, pronunciation list, Kokoro / Pocket TTS
+voices and audio caching run on the device. System voices come from the operating system, and
+some may use a network connection. Read IT has no account, server or upload. With Kokoro or
+Pocket TTS downloaded, a reader can finish a book in a basement with no signal, on a phone that
+is not the latest model.
 
 A neighbouring reader can copy the font and the layout. It cannot truthfully claim the offline
 pipeline (Kokoro / Pocket TTS running at CPU speed with a measured real-time factor, cached
@@ -59,10 +60,12 @@ engineering, not styling.
   themes are first-class, and dark is used for real reading, not as a setting.
 - Data lives in IndexedDB on that device. Backup export/import is the only durability story
   and the only thing that makes a device swap survivable.
-- Network may be absent for days. Anything that silently requires a fetch is a bug.
-- Storage is finite: imported books, downloaded voice models (about 334 MB for the full Kokoro
-  model, 126 MB for the INT8 one, 98 MB for Pocket TTS) and rendered audio share the same
-  budget on a mid-range phone.
+- Network may be absent for days. Downloaded Kokoro and Pocket TTS voices keep reading and
+  listening working offline; a system voice may require a connection.
+- Storage is finite: imported books, downloaded voice models (about 320 MB for Kokoro on the
+  web or 334 MB in the Android app, and 180 MB for Pocket TTS) and rendered audio share the same
+  budget on a mid-range phone. The old 126 MB INT8 Kokoro build is no longer used; it appears
+  only as legacy cleanup.
 - Accessibility here is long-session legibility: reading in poor light, at speed, with the
   phone at arm's length, sometimes while walking.
 
@@ -70,11 +73,11 @@ engineering, not styling.
 
 Confirmed functionality (all shipping or planned in docs/PLAN.md, not aspirational copy):
 
-- Library of imported books and articles; cover art; per-book progress; delete.
+- Library of imported books and articles; per-book progress; delete.
 - Reflow reader for every format, plus a PDF page view with highlight boxes.
 - Read-along sentence highlight; tap a sentence to hear it from there.
-- Highlight, note, bookmark; search; per-book reading progress.
-- On-device TTS engine selection (system voice / Pocket TTS / Kokoro worker / native Kokoro),
+- Highlight, note, bookmark; per-book reading progress.
+- TTS engine selection (system voice / Pocket TTS / Kokoro worker / native Kokoro),
   pronunciation list with user overrides, audio cache.
 - Backup export/import as a zip.
 - Ads and a one-time "Remove Ads" purchase are planned but not in this round: the code must
@@ -83,8 +86,9 @@ Confirmed functionality (all shipping or planned in docs/PLAN.md, not aspiration
 Constraints that design work must respect:
 
 - No backend, no accounts, no telemetry. Any state that matters must survive a reload.
-- No OCR yet: a scanned PDF imports but yields no readable text. The app must say so
-  plainly at import time instead of failing silently.
+- No OCR yet: image-only PDFs are rejected at import. A PDF with sparse selectable text can
+  import with a warning that only the available text can be read. The app must say so plainly
+  instead of failing silently.
 - Apache-2.0 project; bundled fonts and models must carry compatible licences
   (Apache-2.0, MIT, CC-BY-4.0, SIL OFL) and permissive licences only.
 - Offline means no webfont CDN at runtime: type must come from the system or from files
@@ -127,8 +131,9 @@ Constraints that design work must respect:
    out of the way again. If a decoration does not help her read, find, or mark, it goes.
 2. **Quiet competence over persuasion.** No sign-up or marketing carousel (the one guided tour points at real controls, can be skipped, and is replayable from Settings → About), no upsell, no celebration
    confetti. Show the state of things accurately and let her act.
-3. **Say what is true, including what failed.** "Looks scanned — OCR not supported yet" beats
-   a spinner that never resolves. Errors name the file and the reason.
+3. **Say what is true, including what failed.** A clear "Image-only scans require OCR before
+   import" error or sparse-text warning beats a spinner that never resolves. Errors name the
+   file and the reason.
 4. **Offline is the default state, not a degraded one.** Every surface must be complete
    without a network: no skeleton that waits on a fetch, no remote asset, no dependency on a
    CDN.

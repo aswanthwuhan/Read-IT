@@ -93,6 +93,8 @@ describe('AlignModelPanel', () => {
     expect(text).toContain('Not downloaded');
     // The estimate keeps working without it — say so instead of hiding the card.
     expect(text).toContain('estimate from each word');
+    expect(text).toContain('long words and pauses');
+    expect(text).not.toContain('drug names');
     expect(button('Download')?.disabled).toBe(false);
     // The row's actions are secondary: teal is the screen's one primary action.
     expect(button('Download')?.classList.contains('btn-secondary')).toBe(true);

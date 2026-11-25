@@ -25,7 +25,7 @@ rather than a review note.
 |---|---|
 | M0 — Rebrand | App id `app.readit.reader`, Read IT identity, ink+amber design tokens, Apache-2.0 metadata. |
 | M1 — Feature surgery | Study, flashcard, syllabus and AI surfaces removed. Library, reader, highlights, notes, bookmarks, progress, import, backup and settings kept. Book-oriented pronunciation lexicon replaces the old domain lexicon. |
-| M2 — Licence-clean TTS | Native sherpa-onnx 2.0.1 (GPL-free, lexicon frontend); web Kokoro engine vendored from upstream Apache-2.0 sources with the phonemiser replaced by Read IT's own CMUdict/NRL G2P; Pocket TTS for other languages; non-commercial voices excluded. Licence guard, typecheck, tests and builds all green. |
+| M2 — Licence-clean TTS | Native sherpa-onnx 2.0.1 (GPL-free, lexicon frontend); web Kokoro engine vendored from upstream Apache-2.0 sources with the phonemiser replaced by Read IT's own CMUdict/NRL G2P; Pocket TTS for other languages; non-commercial voices excluded from the picker and synthesis allowlist (pruned runtime asset still pending). Licence guard, typecheck, tests and builds all green. |
 
 ## Next (not implemented yet)
 

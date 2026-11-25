@@ -148,18 +148,21 @@ words. Ship the pronunciation override table so users can fix the residue.
 
 ## F. Step 4 — Pocket TTS licence hygiene
 
-* Code MIT, weights **CC-BY-4.0** → commercial use allowed **with attribution**.
+* Code MIT; weights **CC-BY-4.0**. Preserve the required attribution and have the
+  owner/counsel confirm the intended distribution; this runbook is not legal clearance.
 * **Exclude the non-commercial voices:** `cosette` (Expresso, CC-BY-NC-4.0) and `jean`
-  (EARS, CC-BY-NC-4.0). They must not be in the app, the model manifest, or the fallback
-  list.
+  (EARS, CC-BY-NC-4.0) from the picker, synthesis allowlist and fallback list. The
+  upstream monolithic `voices.bin` must also be pruned; hiding names does not remove bytes.
 * Ship an in-app **Credits** panel carrying the required CC-BY-4.0 attributions
   (VCTK-derived `azelma`/`eponine`/`fantine`, `alba`; `jenny` carries its own terms).
 * **No voice-cloning UI.** Kyutai's terms prohibit impersonation without consent.
 
 ## G. Step 5 — the relicensing statement
 
-the earlier reader is GPL-3.0. Read IT is Apache-2.0. The sole copyright holder is
-`aswanthwuhan` (git history: one author and no other human committers), so the relicensing is valid — but it must be **documented**.
+the earlier reader is GPL-3.0. Read IT is Apache-2.0. The repository history identifies
+`aswanthwuhan` as the author (verify the complete history before relying on this).
+`RELICENSING.md` must document the provenance and grant; whether the relicensing is legally
+effective is a question for the owner/counsel, not a conclusion of this runbook.
 
 `RELICENSING.md` should state: the original work, its GPL-3.0 licence and date; the
 copyright holder's exclusive right to relicense; the terms of the new Apache-2.0 grant;

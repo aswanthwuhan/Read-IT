@@ -3,12 +3,16 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../core/db';
 import type { AudioCacheRecord, TtsEngine } from '../core/types';
-import TtsSettings, {
+import {
+  CachePanel,
+  LexiconPanel,
+  VoicePanel,
   TEST_SENTENCE,
   TTS_ENGINE_SETTING,
   TTS_RATE_SETTING,
   TTS_VOICE_SETTING,
   VOICE_TIP,
+  engineHint,
   filterEntries,
   formatBytes,
 } from './TtsSettings';
@@ -66,7 +70,13 @@ async function mount(): Promise<void> {
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(<TtsSettings />);
+    root.render(
+      <div className="tts-settings">
+        <VoicePanel />
+        <LexiconPanel />
+        <CachePanel />
+      </div>,
+    );
   });
   await flush();
   // Every section loads asynchronously (voices, lexicon, cache); wait for the
@@ -214,6 +224,26 @@ describe('TtsSettings', () => {
     const rate = container.querySelector<HTMLInputElement>('#tts-rate');
     expect(rate?.min).toBe('0.5');
     expect(rate?.max).toBe('2');
+  });
+
+  it('describes Kokoro speed as a device measurement, not a promise', () => {
+    const hint = engineHint('kokoro');
+    expect(hint).toContain('Speed varies by device');
+    expect(hint).toContain('Measure speed in On-device models');
+    expect(hint).not.toContain('Faster than real-time on most phones');
+  });
+
+  it('describes system voices without promising that they work offline', async () => {
+    await setSetting(TTS_ENGINE_SETTING, 'system');
+    await mount();
+
+    const engine = container.querySelector<HTMLSelectElement>('#tts-engine')!;
+    const option = [...engine.options].find((candidate) => candidate.value === 'system');
+    expect(option?.textContent).toBe('System voices');
+    expect(container.querySelector('#tts-engine-hint')?.textContent).toContain(
+      'some system voices may use a network connection',
+    );
+    expect(container.querySelector('#tts-engine-hint')?.textContent).not.toContain('works offline');
   });
 
   it('shows the downloaded voices as unavailable when the browser cannot run them', async () => {

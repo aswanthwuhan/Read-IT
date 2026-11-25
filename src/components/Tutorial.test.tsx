@@ -174,6 +174,25 @@ afterEach(async () => {
 });
 
 describe('Tutorial', () => {
+  it('uses shipped terms, current model facts and the system-voice network caveat', () => {
+    const selection = TUTORIAL_STEPS.find((step) => step.id === 'reader-selection');
+    expect(selection?.title).toBe('Highlight, note or bookmark');
+    expect(selection?.body).not.toContain('make a card');
+
+    const models = TUTORIAL_STEPS.find((step) => step.id === 'settings-voice-models');
+    expect(models?.body).toContain('6 voices');
+    expect(models?.body).toContain('about 180 MB');
+    expect(models?.body).toContain('320 MB on the web and 334 MB in the Android app');
+
+    const voice = TUTORIAL_STEPS.find((step) => step.id === 'settings-voice');
+    expect(voice?.body).toContain('some may use a network connection');
+    expect(voice?.body).not.toContain('free and offline');
+
+    const importStep = TUTORIAL_STEPS.find((step) => step.id === 'library-import');
+    expect(importStep?.body).toContain('Image-only PDFs are rejected');
+    expect(importStep?.body).toContain('very little selectable text can import with a warning');
+  });
+
   it('returns to the route, query and section that opened the tour', async () => {
     const original = '/settings?from=library#about';
     await start(DEFAULT_TARGETS, original);

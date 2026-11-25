@@ -2,11 +2,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
+import ErrorBoundary from './components/ErrorBoundary';
 import App from './App';
 import './styles.css';
 import { isIos, isStandalone } from './core/platform';
 
-// BASE_URL carries the deploy sub-path (e.g. /readit/ on Cloudflare Pages) and is '/'
+// BASE_URL carries the deploy sub-path (e.g. /Read-IT/ on GitHub Pages) and is '/'
 // for dev, Android and Windows. react-router wants no trailing slash.
 const basename = import.meta.env.BASE_URL.replace(/\/+$/, '') || '/';
 
@@ -43,7 +44,9 @@ void dropStaleServiceWorker().catch(() => undefined);
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter basename={basename}>
-      <App />
+      <ErrorBoundary onReload={() => window.location.reload()}>
+        <App />
+      </ErrorBoundary>
     </BrowserRouter>
   </StrictMode>,
 );

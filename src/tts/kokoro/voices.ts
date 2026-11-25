@@ -1,6 +1,6 @@
 // @ts-nocheck - vendored upstream (hexgrad/kokoro-js v1.2.1, Apache-2.0); patched for Read IT.
-import path from "path";
-import fs from "fs/promises";
+// Read IT runs this module in browsers only. The upstream Node filesystem branch
+// was removed so Vite does not externalize `path`/`fs` into the client bundle.
 
 export const VOICES = Object.freeze({
   af_heart: {
@@ -455,13 +455,6 @@ export function setVoiceDataUrl(url) {
  * @returns {Promise<ArrayBufferLike>}
  */
 async function getVoiceFile(id) {
-  if (fs && Object.hasOwn(fs, 'readFile')) {
-    const dirname = typeof __dirname !== "undefined" ? __dirname : import.meta.dirname;
-    const file = path.resolve(dirname, `../voices/${id}.bin`);
-    const { buffer } = await fs.readFile(file);
-    return buffer;
-  }
-
   const url = `${voiceDataUrl}/${id}.bin`;
 
   let cache;

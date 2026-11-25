@@ -14,6 +14,8 @@ import { pushBackHandler } from '../core/backButton';
 import { db } from '../core/db';
 import { setSetting } from '../core/settings';
 import type { BookRecord } from '../core/types';
+import { POCKET_VOICES } from '../tts/neural/pocketVoices';
+import { POCKET_SIZE_MB, kokoroSizeMb } from '../tts/neural/sizes';
 
 export const TUTORIAL_SEEN_KEY = 'tutorialSeen';
 
@@ -48,7 +50,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/',
     target: 'import',
     title: 'Import a book',
-    body: 'Tap Import and choose a PDF, EPUB, DOCX, TXT, Markdown or HTML file. It stays on this device and nothing is uploaded. Image-only PDFs need a text layer added with OCR before you can import them.',
+    body: 'Tap Import and choose a PDF, EPUB, DOCX, TXT, Markdown or HTML file. It stays on this device and nothing is uploaded. Image-only PDFs are rejected. PDFs with very little selectable text can import with a warning; OCR is not supported yet.',
   },
   {
     id: 'library-pdf-kind',
@@ -164,7 +166,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'reader-selection',
     route: '/read/{id}',
     needsBook: true,
-    title: 'Highlight, note or make a card',
+    title: 'Highlight, note or bookmark',
     body: 'Press and hold a sentence, or drag across a few, and let go. The bar that opens has a highlight colour, Play, Sentence to extend the selection, Note and Bookmark.',
   },
   {
@@ -172,7 +174,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/settings#voice-models',
     target: '#voice-models .disc-head',
     title: 'Download a voice',
-    body: 'Kokoro-82M is the higher quality, more natural sounding voice and the recommended one: 28 voices, 320 MB on the web and 334 MB in the Android app. Pocket TTS is smaller — 8 voices, about 180 MB. Download sits in each card’s header: it happens once, then that voice works offline, and Delete frees the space. The reader’s voice button offers the same download without leaving the book.',
+    body: `Kokoro-82M is the higher quality, more natural sounding voice and the recommended one: 28 voices, ${kokoroSizeMb()} MB on the web and 334 MB in the Android app. Pocket TTS is smaller — ${POCKET_VOICES.length} voices, about ${POCKET_SIZE_MB} MB. Download sits in each card’s header: it happens once, then that voice works offline, and Delete frees the space. The reader’s voice button offers the same download without leaving the book.`,
   },
   {
     id: 'settings-pdf-layout',
@@ -186,7 +188,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/settings#voice',
     target: '#voice .disc-head',
     title: 'Choose the voice and speed',
-    body: 'Engine decides who reads. Auto uses a downloaded model when one is ready, and the system voice otherwise. System voices are free and offline because they are already on the phone. System voice picks the exact one, and Speed covers 0.5× to 2× for every engine; Pocket TTS stops at 0.80×–1.25×.',
+    body: 'Engine decides who reads. Auto uses a downloaded model when one is ready, and the system voice otherwise. System voices come from your phone and need no download in Read IT, but some may use a network connection. System voice picks the exact one, and Speed covers 0.5× to 2× for every engine; Pocket TTS stops at 0.80×–1.25×.',
   },
   {
     id: 'settings-backup',

@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { db } from '../core/db';
+import { db, putBookSummary } from '../core/db';
 import { installBackBridge } from '../core/backButton';
 import type { BookRecord } from '../core/types';
 import ReaderView from './ReaderView';
@@ -552,8 +552,10 @@ describe('ReaderView reflow', () => {
     expect((await db.books.get(BOOK_ID))?.lastPos).toBeUndefined();
   });
 
-  it('flushes books.lastPos for the library when the reader closes', async () => {
-    await db.books.put(makeBook());
+  it('flushes book and shelf-summary positions for the library when the reader closes', async () => {
+    const book = makeBook();
+    await db.books.put(book);
+    await putBookSummary(book);
     await renderReader();
     await waitFor(() => sentence('0-0-1') !== null, 'second sentence');
 
@@ -569,6 +571,7 @@ describe('ReaderView reflow', () => {
 
     const stored = await db.books.get(BOOK_ID);
     expect(stored?.lastPos).toEqual({ chapterId: 'ch-0', sentenceId: '0-0-1' });
+    expect((await db.bookSummaries.get(BOOK_ID))?.lastPos).toEqual({ chapterId: 'ch-0', sentenceId: '0-0-1' });
   });
 
   it('stops the player when the chapter changes', async () => {
@@ -1492,6 +1495,67 @@ describe('reader: playing a selection', () => {
     await waitFor(() => playerMock.calls.length === 1, 'player created');
     expect(container.textContent).not.toContain('Sentence 1 of 3');
     expect(container.textContent).toContain('Selection: sentence 1 of 1');
+  });
+});
+
+describe('reader: chapters and notes tabs', () => {
+  async function openDrawer(): Promise<void> {
+    await db.books.put(makeBook());
+    await renderReader();
+    await waitFor(() => sentence('0-0-0') !== null, 'reader ready');
+    await act(async () => buttonByLabel('Contents')?.click());
+  }
+
+  it('links two tabs to labelled panels and keeps Close outside the tablist', async () => {
+    await openDrawer();
+    const tablist = container.querySelector<HTMLElement>('[role="tablist"]');
+    const close = container.querySelector<HTMLButtonElement>('.rd-tab-close');
+    const tabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Chapters', 'Notes']);
+    expect(close?.getAttribute('aria-label')).toBe('Close');
+    expect(tablist?.contains(close ?? null)).toBe(false);
+
+    for (const tab of tabs) {
+      const id = tab.id;
+      const panelId = tab.getAttribute('aria-controls');
+      expect(id).not.toBe('');
+      expect(panelId).not.toBeNull();
+      const panel = container.querySelector<HTMLElement>(`[id="${panelId}"]`);
+      expect(panel?.getAttribute('role')).toBe('tabpanel');
+      expect(panel?.getAttribute('aria-labelledby')).toBe(id);
+    }
+    expect(tabs.map((tab) => tab.getAttribute('aria-selected'))).toEqual(['true', 'false']);
+    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1]);
+    expect(container.querySelectorAll('[role="tabpanel"]')).toHaveLength(2);
+    expect(container.querySelector<HTMLElement>('[role="tabpanel"][hidden]')).not.toBeNull();
+  });
+
+  it('moves selection and focus with Arrow, Home and End using a roving tabindex', async () => {
+    await openDrawer();
+    const tabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const chapters = tabs[0]!;
+    const notes = tabs[1]!;
+    const press = async (key: string): Promise<void> => {
+      await act(async () => {
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      });
+    };
+
+    chapters.focus();
+    await press('ArrowRight');
+    expect(document.activeElement).toBe(notes);
+    expect(notes.getAttribute('aria-selected')).toBe('true');
+    expect([chapters.tabIndex, notes.tabIndex]).toEqual([-1, 0]);
+    expect(notes.getAttribute('aria-controls')).toBe(container.querySelector<HTMLElement>('[role="tabpanel"]:not([hidden])')?.id);
+
+    await press('End');
+    expect(document.activeElement).toBe(notes);
+    await press('Home');
+    expect(document.activeElement).toBe(chapters);
+    expect(chapters.getAttribute('aria-selected')).toBe('true');
+    await press('ArrowLeft');
+    expect(document.activeElement).toBe(notes);
+    expect(notes.getAttribute('aria-selected')).toBe('true');
   });
 });
 

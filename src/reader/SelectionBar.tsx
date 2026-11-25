@@ -3,7 +3,8 @@
  * bookmark the sentence, or keep reading. It wears the same sheet surface and
  * corner radius as every other panel in the app.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import { useFocusGuard } from '../core/focusGuard';
 import { Glyph, icons } from './Icon';
 
 export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink';
@@ -43,6 +44,7 @@ export default function SelectionBar({
   const [savingNote, setSavingNote] = useState(false);
   const [noteError, setNoteError] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  useFocusGuard({ active: true, mode: 'modal', containerRef: box, onEscape: onClose });
 
   async function saveNote(): Promise<void> {
     const text = note.trim();
@@ -63,17 +65,6 @@ export default function SelectionBar({
     }
   }
 
-  // Keyboard and screen-reader users land in the toolbar, not back at the top
-  // of the document.
-  useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
-    box.current?.focus();
-    // Return focus where the selection started when the toolbar closes.
-    return () => {
-      opener?.focus?.();
-    };
-  }, []);
-
   return (
     <div
       ref={box}
@@ -82,30 +73,6 @@ export default function SelectionBar({
       aria-modal="true"
       aria-label={`Actions for ${count} selected sentence${count === 1 ? '' : 's'}`}
       tabIndex={-1}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          event.stopPropagation();
-          onClose();
-          return;
-        }
-        if (event.key !== 'Tab') return;
-        // aria-modal content must contain Tab, including when the container
-        // itself (tabIndex=-1) started with focus.
-        const focusable = [...(box.current?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
-        ) ?? [])];
-        if (focusable.length === 0) return;
-        const first = focusable[0]!;
-        const last = focusable[focusable.length - 1]!;
-        if (event.shiftKey && (document.activeElement === first || document.activeElement === box.current)) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }}
     >
       <div className="rd-select-head">
         <p className="rd-select-text">{text.length > 140 ? `${text.slice(0, 140)}…` : text}</p>

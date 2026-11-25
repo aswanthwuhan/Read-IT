@@ -10,7 +10,10 @@ import { Inflate } from 'fflate';
 export const MAX_ZIP_ENTRIES = 20_000;
 export const MAX_ZIP_TOTAL_BYTES = 500 * 1024 * 1024;
 
-/** Verify actual output before passing the archive to a buffering ZIP reader. */
+/**
+ * Verify actual output before passing the archive to a buffering ZIP reader.
+ * @deprecated Use `validateZipBytes` from `./zipValidate` for new adapters.
+ */
 export function verifyZipOutput(data: ArrayBuffer): void {
   const view = new DataView(data);
   const bytes = new Uint8Array(data);
@@ -95,7 +98,7 @@ export function assertArchiveSize(totalUncompressed: number): void {
  * A name is unsafe when it is absolute or walks above the archive root. Backslashes
  * are normalised first because a Windows-authored entry can use either separator.
  */
-function assertSafeName(name: string): void {
+export function assertSafeName(name: string): void {
   const path = name.replace(/\\/g, '/');
   if (path.startsWith('/') || /^[A-Za-z]:/.test(path)) {
     throw new Error("That book's archive contains an unsafe file path.");

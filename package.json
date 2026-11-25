@@ -4,12 +4,19 @@
   "version": "0.6.2",
   "type": "module",
   "license": "Apache-2.0",
+  "packageManager": "pnpm@12.11.2",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=12 <13"
+  },
   "scripts": {
     "dev": "node scripts/copy-ort.mjs && node scripts/copy-pdfjs.mjs && vite",
     "build": "node scripts/copy-ort.mjs && node scripts/copy-pdfjs.mjs && tsc -b && vite build && node scripts/prune-dist.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p .",
+    "test:pwa-artifact": "node --test scripts/check-pwa-artifact.node-test.mjs",
+    "check:pwa-artifact": "node scripts/check-pwa-artifact.mjs --dist dist --base /Read-IT/",
     "build:native": "node scripts/copy-ort.mjs && node scripts/copy-pdfjs.mjs && tsc -b && vite build --mode native && node scripts/prune-dist.mjs",
     "android:sync": "pnpm android:libs && pnpm build:native && cap sync android",
     "android:apk": "cd android && gradlew assembleDebug",

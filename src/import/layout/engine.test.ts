@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LABELS, decodeDetections, dedupeBoxes, packInput, regionKind } from './engine';
+import { LABELS, MAX_LAYOUT_BOXES, decodeDetections, dedupeBoxes, isValidLayoutBox, packInput, regionKind } from './engine';
 
 describe('regionKind', () => {
   it('maps the vocabulary the model was trained on to the reader kinds', () => {
@@ -51,6 +51,44 @@ describe('decodeDetections', () => {
     expect(box.x + box.w).toBeLessThanOrEqual(400);
     expect(box.y + box.h).toBeLessThanOrEqual(800);
   });
+
+  it('drops non-finite detections and rejects unusable page geometry', () => {
+    const detections = decodeDetections(
+      rows([
+        LABELS.indexOf('text'), 0.9, Number.NaN, 10, 100, 100,
+        LABELS.indexOf('text'), 0.9, 10, 10, Number.POSITIVE_INFINITY, 100,
+        LABELS.indexOf('text'), Number.NaN, 10, 10, 100, 100,
+        LABELS.indexOf('text'), 0.9, 10, 10, 100, 100,
+      ]),
+      400,
+      800,
+      640,
+      0.5,
+    );
+    expect(detections).toHaveLength(1);
+    expect(detections[0].w).toBeGreaterThan(0);
+    expect(decodeDetections(rows([]), Number.NaN, 800, 640, 0.5)).toEqual([]);
+    expect(decodeDetections(rows([]), 400, 800, 0, 0.5)).toEqual([]);
+  });
+
+  it('caps the number of model regions', () => {
+    const many = rows(Array.from({ length: MAX_LAYOUT_BOXES + 10 }, () => [
+      LABELS.indexOf('text'), 0.9, 10, 10, 100, 100,
+    ]).flat());
+    expect(decodeDetections(many, 400, 800, 640, 0.5)).toHaveLength(MAX_LAYOUT_BOXES);
+    expect(decodeDetections(many, 400, 800, 640, 0.5, 2)).toHaveLength(2);
+  });
+});
+
+describe('isValidLayoutBox', () => {
+  it('rejects non-finite, oversized and out-of-page worker output', () => {
+    const valid = { x: 10, y: 20, w: 30, h: 40, label: 'text', score: 0.9 };
+    expect(isValidLayoutBox(valid, 600, 800)).toBe(true);
+    expect(isValidLayoutBox({ ...valid, x: Number.NaN }, 600, 800)).toBe(false);
+    expect(isValidLayoutBox({ ...valid, w: Number.POSITIVE_INFINITY }, 600, 800)).toBe(false);
+    expect(isValidLayoutBox({ ...valid, score: 2 }, 600, 800)).toBe(false);
+    expect(isValidLayoutBox({ ...valid, x: 10_000 }, 600, 800)).toBe(false);
+  });
 });
 
 describe('packInput', () => {
@@ -82,5 +120,15 @@ describe('dedupeBoxes', () => {
     ]);
 
     expect(kept.map((box) => box.label)).toEqual(['text', 'chart']);
+  });
+
+  it('drops invalid boxes and honours its output cap', () => {
+    const kept = dedupeBoxes([
+      { x: Number.NaN, y: 0, w: 100, h: 100, label: 'text', score: 1 },
+      { x: 0, y: 0, w: 10, h: 10, label: 'text', score: 0.9 },
+      { x: 20, y: 0, w: 10, h: 10, label: 'text', score: 0.8 },
+    ], 0.6, 1);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].x).toBe(0);
   });
 });

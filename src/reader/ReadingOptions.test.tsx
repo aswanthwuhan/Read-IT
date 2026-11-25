@@ -112,6 +112,8 @@ describe('ReadingOptions', () => {
     const pause = container.querySelector<HTMLInputElement>('#rd-pause')!;
     expect(pause.value).toBe(String(DEFAULT_PAUSE_MS));
     expect(container.textContent).toContain('0.3 s of silence between paragraphs');
+    expect(container.textContent).toContain('Tables stay on the page, unread.');
+    expect(container.textContent).not.toContain('Dose tables');
   });
 
   it('offers exactly four ways to read brackets', async () => {

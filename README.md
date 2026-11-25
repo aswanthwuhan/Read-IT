@@ -13,19 +13,19 @@ installable PWA. See `CHANGELOG.md`. The source is public at
 ## Who it is for
 
 - People with a shelf of ebooks, papers or textbooks they want to read on a phone, offline.
-- Anyone who wants a long document read aloud in a natural voice with nothing leaving the device.
+- Anyone who wants a long document read aloud in a natural on-device voice with nothing leaving the device.
 - Readers who want highlights, notes and their place in a book to survive a reinstall.
 
 ## Features
 
 - Import your own PDF, EPUB, DOCX, TXT/Markdown and web articles, or paste text.
 - Read in a reflowing reader, or keep a PDF as pages with the sentence boxes in place.
-- Listen with on-device voices (Kokoro-82M and Pocket TTS) or the system voice.
+- Listen with Kokoro-82M or Pocket TTS on the device, or with a system voice.
 - Follow the read-along highlight; an optional on-device Whisper aligner makes it precise.
 - Hear names and unusual words correctly through a pronunciation list you can edit.
 - Save highlights, notes and bookmarks, and keep your place in each book.
 - Keep reading with the screen off, with lock-screen controls and a sleep timer.
-- Work fully offline. Files, highlights and notes stay on the device, with no account and no server.
+- Read and listen offline with a downloaded Kokoro or Pocket TTS voice. Files, highlights and notes stay on the device, with no account and no server.
 - Run on Android, Windows and as an installable PWA. An iOS app is on the plan.
 
 ## Download / install
@@ -52,9 +52,11 @@ Until then, build it yourself — see [Build from source](#build-from-source).
 ## Privacy
 
 Imported files, highlights, notes and your place in each book are stored in IndexedDB on your
-device. There is no server and no account, and nothing about what you read is sent anywhere.
-Ads and a one-time "Remove Ads" purchase are planned; neither is in this release. Backup export
-is the only copy, so export one before changing device.
+device. Read IT does not upload your library, highlights, notes or progress. Kokoro and Pocket TTS
+run on the device. System voices are provided by your device; some may use a network connection.
+The optional update check contacts GitHub for release information only. Ads and a one-time "Remove
+Ads" purchase are planned; neither is in this release. Backup export is the only portable copy, so export
+one before changing device.
 
 ## FAQ
 
@@ -65,9 +67,9 @@ are planned; nothing is charged for anything in this release.
 
 **Do I need an account or an internet connection?**
 
-No account, ever. After the one-time voice model download the app works offline. Importing a web
-article needs a connection at the moment you import it; reading and listening to it afterwards
-does not.
+No account, ever. After the one-time Kokoro or Pocket TTS model download, reading and listening
+with that voice work offline. Importing a web article needs a connection at the moment you import
+it; reading it afterwards does not. A system voice may need a network connection.
 
 **Which formats can it open?**
 
@@ -76,8 +78,8 @@ where it does not). There is no OCR, no DRM, and no MOBI or AZW3.
 
 **Does it work with scanned PDFs?**
 
-Not yet. A scanned PDF imports but has no readable text because there is no OCR, and the app says
-so at import.
+No. Read IT rejects image-only PDFs because there is no OCR. A PDF with some selectable text can
+still import when that text is sparse; the app warns that only the available text can be read.
 
 **Which devices does it run on?**
 
@@ -97,9 +99,10 @@ The inventory is in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 **How big are the voice models?**
 
-Kokoro is about 334 MB for the full model and 126 MB for the lighter INT8 one. Pocket TTS is
-about 98 MB. Each downloads once, then is cached on the device. The system voice needs no
-download at all.
+Kokoro is about 320 MB on the web and 334 MB in the Android app. Pocket TTS is about 180 MB.
+Each downloads once, then is cached on the device. The older 126 MB INT8 Kokoro build is no
+longer offered; Settings only offers to remove those legacy files. A system voice needs no
+download in Read IT, though some system voices use a network connection.
 
 ## Build from source
 
@@ -112,7 +115,9 @@ pnpm install   then:   pnpm dev    (dev server)   pnpm test   (vitest)   pnpm bu
 - **Contributors:** see [CONTRIBUTORS.md](CONTRIBUTORS.md).
 - **Voices:** Pocket TTS by Kyutai (code MIT, weights CC-BY-4.0) · Kokoro-82M by hexgrad
   (Apache-2.0), run through sherpa-onnx (Apache-2.0). The Pocket voices that need attribution
-  carry it inside the app's Credits panel; the non-commercial voices are not shipped.
+  carry it inside the app's Credits panel. The app offers only six allowlisted voices; the
+  current upstream `voices.bin` still contains two non-commercial records, so a pruned, pinned
+  asset is required before a commercial release. Filtering the picker does not remove those bytes.
 - **Reading font:** Literata (SIL OFL 1.1), self-hosted so nothing is fetched from a CDN.
 - **Licence:** Apache-2.0. Provenance is recorded in [RELICENSING.md](RELICENSING.md); bundled
   components are listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

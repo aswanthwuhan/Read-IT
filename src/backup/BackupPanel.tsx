@@ -14,6 +14,7 @@ import './backup.css';
 
 const TABLE_LABEL: Record<string, readonly [string, string]> = {
   books: ['book', 'books'],
+  bookContent: ['book document', 'book documents'],
   highlights: ['highlight', 'highlights'],
   bookmarks: ['bookmark', 'bookmarks'],
   lexicon: ['pronunciation', 'pronunciations'],
@@ -63,7 +64,7 @@ export default function BackupPanel() {
     if (
       mode === 'replace' &&
       !window.confirm(
-        'Replace all books, highlights, bookmarks and pronunciations on this device with the backup? ' +
+        'Replace all books, notes, highlights, bookmarks, pronunciations and cached audio on this device with the backup? ' +
           'Settings in the backup are overwritten; private/device settings are kept. This cannot be undone.',
       )
     ) {
@@ -131,7 +132,8 @@ export default function BackupPanel() {
               onChange={() => setMode('merge')}
             />
             <span>
-              <span className="backup-radio-label">Merge</span> — add to what is already here
+              <span className="backup-radio-label">Merge</span> — add new records; matching IDs already
+              here are kept
             </span>
           </label>
           <label className="backup-radio">
@@ -143,8 +145,8 @@ export default function BackupPanel() {
               onChange={() => setMode('replace')}
             />
             <span>
-              <span className="backup-radio-label">Replace</span> — delete local books, highlights, bookmarks
-              and pronunciations first; overwrite settings in the backup
+              <span className="backup-radio-label">Replace</span> — delete local books, notes, highlights,
+              bookmarks, pronunciations and cached audio first; overwrite settings in the backup
             </span>
           </label>
         </div>
@@ -152,9 +154,9 @@ export default function BackupPanel() {
         {mode === 'replace' ? (
           <div className="banner banner-warning" role="alert">
             <p>
-              Importing will delete the books, highlights, bookmarks and pronunciations already on
-              this device. Settings in the backup overwrite matching settings here; private/device
-              settings are kept. This cannot be undone.
+              Importing will delete the books, notes, highlights, bookmarks, pronunciations and cached
+              audio already on this device. Settings in the backup overwrite matching settings here;
+              private/device settings are kept. This cannot be undone.
             </p>
           </div>
         ) : null}
@@ -182,16 +184,19 @@ export default function BackupPanel() {
         <div className="disc-sub-body">
           <div className="backup-explain">
             <p>
-              The audio cache is left out of a backup — it is rebuilt when you listen again. Private per-device settings
-              are never written into a backup.
+              The audio cache is left out of a backup — it is rebuilt when you listen again. Merge keeps
+              cached audio on this device; Replace clears it as part of a successful restore. Private
+              per-device settings are never written into a backup.
             </p>
             <p>
               The .zip holds your books, highlights, notes and settings. On a phone it is saved in Documents/Read IT; in a browser
               it goes to your Downloads folder.
             </p>
             <p>
-              Merge adds the backup to what is already here. Replace deletes local books, highlights,
-              bookmarks and pronunciations first and overwrites settings included in the backup;
+              Merge adds records whose IDs are not already here. Matching local books and their
+              documents, notes, highlights, bookmarks, settings and pronunciations are kept; IDs repeated
+              in the backup are skipped. Replace deletes local books, notes, highlights, bookmarks,
+              pronunciations and cached audio first and overwrites settings included in the backup;
               private/device settings stay as they are.
             </p>
           </div>
@@ -204,10 +209,26 @@ export default function BackupPanel() {
 function describe(report: ImportReport): string {
   const parts = Object.entries(report.counts).map(([table, n]) => `${n} ${label(table, n)}`);
   const head = parts.length ? `Imported ${parts.join(', ')}.` : 'The backup had no records.';
+  const skipped = Object.values(report.skipped).reduce((total, n) => total + n, 0);
+  const collisions = Object.values(report.collisions).reduce((total, n) => total + n, 0);
+  const details: string[] = [];
+  if (collisions > 0) {
+    details.push(
+      `Skipped ${collisions} record${collisions === 1 ? '' : 's'} because of ID collisions with local data, ` +
+        'an existing book or repeated IDs in the backup.',
+    );
+  }
+  const orphans = skipped - collisions;
+  if (orphans > 0) {
+    details.push(
+      `Skipped ${orphans} book document${orphans === 1 ? '' : 's'} without a matching book in the import.`,
+    );
+  }
+  if (report.audioCleared) details.push('Cached audio was cleared.');
   const missing = report.missingFile.length
     ? ` ${report.missingFile.length} book file${report.missingFile.length === 1 ? ' was' : 's were'} not in the zip — re-import those books to read them.`
     : '';
-  return head + missing;
+  return [head, ...details, missing.trim()].filter(Boolean).join(' ');
 }
 
 function megabytes(bytes: number): string {

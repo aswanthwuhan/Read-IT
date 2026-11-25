@@ -2,13 +2,13 @@
 <!--
   Android <= 11 backup rules.
 
-  The WebView data directory is excluded on purpose. It holds the IndexedDB stores: the notes
-  themselves and the AI settings, including the API key in plain text. Neither belongs in a
-  cloud backup that an account compromise or a device restore can read.
+  The WebView data directory is excluded on purpose. It holds the IndexedDB stores: books,
+  highlights, notes, pronunciation rules and private settings. Neither belongs in a cloud backup
+  that an account compromise or a device restore can read.
 -->
 <full-backup-content>
     <!-- 334 MB model that re-downloads on demand. -->
     <exclude domain="file" path="kokoro/" />
-    <!-- app_webview/: IndexedDB (notes, AI API key), localStorage and caches. -->
+    <!-- app_webview/: IndexedDB (books and notes), localStorage, private settings and caches. -->
     <exclude domain="root" path="app_webview/" />
 </full-backup-content>

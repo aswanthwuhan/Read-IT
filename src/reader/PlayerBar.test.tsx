@@ -171,6 +171,48 @@ describe('PlayerBar speed', () => {
   });
 });
 
+describe('PlayerBar popover focus', () => {
+  it('focuses the speed slider and returns focus to the speed trigger on Escape', async () => {
+    await renderBar(makeProps());
+    const trigger = container.querySelector<HTMLButtonElement>('.rd-speed')!;
+    await act(async () => trigger.click());
+
+    const slider = container.querySelector<HTMLInputElement>('input[aria-label="Playback speed"]')!;
+    const popover = container.querySelector<HTMLElement>('.rd-pop')!;
+    expect(document.activeElement).toBe(slider);
+    expect(popover.hasAttribute('aria-modal')).toBe(false);
+
+    await act(async () => {
+      slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+
+    expect(popoversHidden()).toBe(true);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('focuses the More menu without trapping Tab or outside focus, then restores its trigger', async () => {
+    await renderBar(makeProps());
+    const trigger = buttonByLabel('Playback options')!;
+    await act(async () => trigger.click());
+
+    const firstAction = buttonByLabel('Stop and save my place')!;
+    expect(document.activeElement).toBe(firstAction);
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    await act(async () => firstAction.dispatchEvent(tab));
+    expect(tab.defaultPrevented).toBe(false);
+
+    const speed = container.querySelector<HTMLButtonElement>('.rd-speed')!;
+    await act(async () => speed.focus());
+    expect(document.activeElement).toBe(speed);
+
+    await act(async () => {
+      speed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(popoversHidden()).toBe(true);
+    expect(document.activeElement).toBe(trigger);
+  });
+});
+
 describe('PlayerBar sleep timer', () => {
   it('pauses the voice when the timer runs out and clears itself', async () => {
     vi.useFakeTimers();
@@ -295,6 +337,7 @@ describe('PlayerBar and the Android back key', () => {
       expect(handled).toBe(true);
       expect(navigate).not.toHaveBeenCalled();
       expect(popoversHidden()).toBe(true);
+      expect(document.activeElement).toBe(buttonByLabel('Playback options'));
 
       // Nothing of the bar's own is open now, so the press must reach the book.
       await act(async () => {

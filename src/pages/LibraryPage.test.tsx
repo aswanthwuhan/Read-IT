@@ -3,11 +3,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installBackBridge } from '../core/backButton';
-import { db } from '../core/db';
+import { db, putBookSummary } from '../core/db';
 import { getSetting } from '../core/settings';
 import type { BookRecord, ColumnMode } from '../core/types';
 import { deleteBook, importFileDetailed, setBookColumns } from '../import';
 import { IMPORT_LAYOUT_KEY } from '../import/importLayout';
+import { PASTE_MAX_CHARS, TITLE_MAX_CHARS } from '../import/limits';
 import LibraryPage from './LibraryPage';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -239,13 +240,49 @@ afterEach(async () => {
   await db.open();
 });
 
+describe('library: lightweight shelf', () => {
+  it('converges on legacy rows in bounded repair batches', async () => {
+    const books = Array.from({ length: 5 }, (_, at) => makeBook({
+      id: `legacy-${at}`,
+      title: `Legacy ${at}`,
+      addedAt: at + 1,
+    }));
+    await db.books.bulkAdd(books);
+    await renderLibrary();
+
+    await waitFor(() => {
+      const titles = [...container.querySelectorAll('.lib-title')].map((node) => node.textContent);
+      return titles.length === books.length && titles.every((title) => title?.startsWith('Legacy '));
+    }, 'all legacy summaries');
+    expect(await db.bookSummaries.count()).toBe(books.length);
+    expect(container.textContent).not.toContain('Book details unavailable');
+  });
+
+  it('does not load full book rows when a summary exists', async () => {
+    const book = makeBook();
+    await db.books.put(book);
+    await putBookSummary(book);
+    const toArray = vi.spyOn(db.books, 'toArray');
+    const bulkGet = vi.spyOn(db.books, 'bulkGet');
+    const get = vi.spyOn(db.books, 'get');
+
+    await renderLibrary();
+
+    await waitFor(() => container.querySelector('.lib-open') !== null, 'loaded book');
+    expect(container.querySelector('.lib-title')?.textContent).toBe('Literature Notes');
+    expect(toArray).not.toHaveBeenCalled();
+    expect(bulkGet).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+  });
+});
+
 describe('library: continue listening', () => {
   it('offers the last book with a play link that starts playback', async () => {
     await db.books.put(makeBook());
     await db.settings.put({ key: 'reader.lastBook', value: { bookId: 'book-1', at: Date.now() } });
     await renderLibrary();
 
-    await waitFor(() => continueLink() !== null, 'continue button');
+    await waitFor(() => continueLink()?.textContent?.includes('Literature Notes') === true, 'continue button');
     const link = continueLink();
     expect(link?.textContent).toContain('Continue:');
     expect(link?.textContent).toContain('Literature Notes');
@@ -270,6 +307,47 @@ describe('library: reading progress', () => {
     await renderLibrary();
     await waitFor(() => container.querySelector('.lib-pct') !== null, 'reading percentage');
     expect(container.querySelector('.lib-pct')?.textContent).toBe('50%');
+  });
+
+  it('updates progress from the reader position without reloading the book', async () => {
+    const book = makeBook();
+    book.parsed.chapters[0].blocks[0].sentences.push({ id: '0-0-1', text: 'Distribution comes next.' });
+    await db.books.put(book);
+    await putBookSummary(book);
+    await renderLibrary();
+    await waitFor(() => container.querySelector('.lib-open') !== null, 'loaded book');
+    expect(container.querySelector('.lib-pct')).toBeNull();
+
+    await act(async () => {
+      await db.settings.put({
+        key: `reader.lastPos.${book.id}`,
+        value: { chapterId: 'ch-0', sentenceId: '0-0-1' },
+      });
+    });
+
+    await waitFor(() => container.querySelector('.lib-pct')?.textContent === '100%', 'updated percentage');
+  });
+
+  it('shows progress for production chapter-block ids after chapter 0', async () => {
+    const book = makeBook({
+      lastPos: { chapterId: 'ch-1', sentenceId: '1-1-0' },
+    });
+    book.parsed.chapters = [
+      {
+        id: 'ch-0', title: 'Opening', blocks: [
+          { id: 'b-0-0', kind: 'p', sentences: [{ id: '0-0-0', text: 'Opening sentence.' }] },
+        ],
+      },
+      {
+        id: 'ch-1', title: 'Middle', blocks: [
+          { id: 'b-1-0', kind: 'p', sentences: [{ id: '1-0-0', text: 'Middle sentence.' }] },
+          { id: 'b-1-1', kind: 'p', sentences: [{ id: '1-1-0', text: 'Later block sentence.' }] },
+        ],
+      },
+    ];
+    await db.books.put(book);
+    await renderLibrary();
+    await waitFor(() => container.querySelector('.lib-pct')?.textContent === '100%', 'later-chapter percentage');
   });
 
   it.each([
@@ -337,6 +415,37 @@ describe('library: backup reminder', () => {
     await waitFor(() => container.querySelector('.empty-state') !== null, 'empty state');
     expect(backupBanner()).toBeNull();
     expect(continueLink()).toBeNull();
+  });
+});
+
+describe('library: errors', () => {
+  it('labels a failed import as an import failure', async () => {
+    vi.mocked(importFileDetailed).mockRejectedValueOnce(new Error('The file could not be read'));
+    await renderLibrary();
+
+    await pickFiles(makeFile('notes.txt', 'text/plain'));
+    await waitFor(() => container.querySelector('.banner-error') !== null, 'import error');
+
+    const banner = container.querySelector('.banner-error');
+    expect(banner?.querySelector('.banner-title')?.textContent).toBe('Could not import');
+    expect(banner?.textContent).toContain('notes.txt: The file could not be read');
+  });
+
+  it('labels a failed delete as a delete failure, not an import failure', async () => {
+    await db.books.put(makeBook());
+    vi.mocked(deleteBook).mockRejectedValueOnce(new Error('The database is locked'));
+    await renderLibrary();
+    await openMenu();
+
+    await act(async () => {
+      sheetAction('Delete book')?.click();
+    });
+    await waitFor(() => container.querySelector('.banner-error') !== null, 'delete error');
+
+    const banner = container.querySelector('.banner-error');
+    expect(banner?.querySelector('.banner-title')?.textContent).toBe('Could not delete book');
+    expect(banner?.textContent).toContain('Could not delete “Literature Notes”: The database is locked');
+    expect(banner?.textContent).not.toContain('Could not import');
   });
 });
 
@@ -570,12 +679,35 @@ describe('library: a PDF book\'s columns', () => {
 });
 
 describe('library: voice-model links', () => {
-  it('points both empty-state settings links at the voice models section', async () => {
+  it('keeps one quiet link to voice models in the empty state', async () => {
     await renderLibrary();
     await waitFor(() => container.querySelector('.empty-state') !== null, 'empty state');
 
     const links = [...container.querySelectorAll<HTMLAnchorElement>('a[href="/settings#voice-models"]')];
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(1);
+    expect(links[0]?.textContent).toBe('Choose a voice in Settings');
+    expect(container.querySelector('.empty-state ol')).toBeNull();
+    expect(container.querySelector('.empty-state-actions .btn-primary')).toBeNull();
+    expect(container.textContent).not.toContain('on the ward');
+    expect(container.textContent).toContain('Image-only PDFs are rejected');
+    expect(container.textContent).toContain('very little selectable text can import with a warning');
+  });
+});
+
+describe('library: paste input bounds', () => {
+  it('caps the title and text controls at the import limits', async () => {
+    await renderLibrary();
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent === 'Paste text')
+        ?.click();
+    });
+    await waitFor(() => container.querySelector('#lib-text-panel textarea') !== null, 'paste panel');
+
+    const title = container.querySelector<HTMLInputElement>('#lib-text-panel input[type="text"]');
+    const text = container.querySelector<HTMLTextAreaElement>('#lib-text-panel textarea');
+    expect(title?.maxLength).toBe(TITLE_MAX_CHARS);
+    expect(text?.maxLength).toBe(PASTE_MAX_CHARS);
   });
 });
 

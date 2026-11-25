@@ -15,11 +15,12 @@ import type { TtsEngine } from '../core/types';
  * saved under, and dropping it would re-render all of them for no change in the audio.
  * The variant only changes when the audio would: `@chunked` was added when long
  * sentences started being split before the model sees them, because every clip cached
- * before that is missing its last words. (When q8 was a choice, the variants differed
- * because the int8 build played the same voice as babble.) The other half of the
- * variant is the engine's own voice choice: the reader passes the phone voice to every
- * engine, which is no Kokoro or Pocket voice at all, so the id in the request is not
- * the identity of the audio.
+ * before that is missing its last words. `@chunked-lead-safe-v2` retires Android clips
+ * rendered before the leading edge stopped being trimmed, which could delete quiet
+ * opening words. (When q8 was a choice, the variants differed because the int8 build
+ * played the same voice as babble.) The other half of the variant is the engine's own
+ * voice choice: the reader passes the phone voice to every engine, which is no Kokoro
+ * or Pocket voice at all, so the id in the request is not the identity of the audio.
  * Engines without a variant keep the plain voice id, so their existing entries stay
  * valid.
  */

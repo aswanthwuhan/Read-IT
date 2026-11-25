@@ -146,7 +146,7 @@ public final class KokoroModel {
     // The descriptor table.
     // ---------------------------------------------------------------------------------
 
-    /** Full-precision Kokoro v1.0. */
+    /** Full-precision Kokoro v1.0. The fp32 graph still needs a pinned SHA-256 before release. */
     public static final Descriptor FP32 = new Descriptor(
             KEY_FP32,
             FP32_ID,

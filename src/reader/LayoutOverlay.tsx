@@ -22,6 +22,17 @@ const GROUP_LABEL: Record<BlockGroup, string> = {
   media: 'Figure, table or caption',
   other: 'Other',
 };
+const MIN_TARGET_PX = 48;
+
+function isSmallBlock(block: PageBlock, scale: number): boolean {
+  return block.box.w * scale < MIN_TARGET_PX || block.box.h * scale < MIN_TARGET_PX;
+}
+
+function blockLabel(group: BlockGroup, number: number | null): string {
+  return number === null
+    ? `${GROUP_LABEL[group]} block, not tapped yet`
+    : `${GROUP_LABEL[group]} block, position ${number} in the new order`;
+}
 
 /**
  * Four colours for a dozen block kinds. What the reader has to tell apart on a
@@ -69,6 +80,7 @@ export default function LayoutOverlay({ blocks, scale, onSave, panelHost }: Layo
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const layer = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const fixButton = useRef<HTMLButtonElement>(null);
   const wasFixing = useRef(false);
 
@@ -80,12 +92,18 @@ export default function LayoutOverlay({ blocks, scale, onSave, panelHost }: Layo
   useEffect(() => {
     if (mode === 'fix' && !wasFixing.current) {
       wasFixing.current = true;
-      layer.current?.querySelector<HTMLButtonElement>('button')?.focus();
+      const first = blocks[0];
+      const target = first
+        ? isSmallBlock(first, scale)
+          ? panelRef.current?.querySelector<HTMLButtonElement>('button[data-small-block-id]')
+          : layer.current?.querySelector<HTMLButtonElement>('button[data-block-id]')
+        : null;
+      target?.focus();
     } else if (mode === 'view' && wasFixing.current) {
       wasFixing.current = false;
       fixButton.current?.focus();
     }
-  }, [mode]);
+  }, [mode, blocks, scale]);
 
   // Another page, or the reload that follows a save: the taps belonged to a
   // page that is no longer on screen.
@@ -131,8 +149,10 @@ export default function LayoutOverlay({ blocks, scale, onSave, panelHost }: Layo
     }
   }
 
+  const smallBlocks = mode === 'fix' ? blocks.filter((block) => isSmallBlock(block, scale)) : [];
+
   const panel = (
-    <div className={styles.panel}>
+    <div ref={panelRef} className={styles.panel}>
       <div className={styles.head}>
         <p className={styles.note}>Re-analysing this book replaces manual order.</p>
         {mode === 'view' && blocks.length > 0 ? (
@@ -156,6 +176,34 @@ export default function LayoutOverlay({ blocks, scale, onSave, panelHost }: Layo
               ? 'Tap the blocks in the order they should be read.'
               : `${picked.length} of ${blocks.length} tapped — the rest follow in their current order.`}
           </p>
+          {smallBlocks.length > 0 ? (
+            <>
+              <p className={styles.smallBlockTitle}>Small blocks</p>
+              <ul className={styles.smallBlockList} aria-label="Small blocks">
+                {smallBlocks.map((block) => {
+                  const group = blockGroup(block.kind);
+                  const number = numberFor(block);
+                  return (
+                    <li key={block.blockId}>
+                      <button
+                        type="button"
+                        className={`btn btn-secondary ${styles.smallBlock}`}
+                        data-small-block-id={block.blockId}
+                        data-picked={number === null ? undefined : 'true'}
+                        aria-label={blockLabel(group, number)}
+                        onClick={() => tap(block.blockId)}
+                      >
+                        <span className={styles.listNumber} aria-hidden="true">
+                          {number ?? '–'}
+                        </span>
+                        <span>{blockLabel(group, number)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          ) : null}
           <div className={styles.row}>
             <button
               type="button"
@@ -210,15 +258,17 @@ export default function LayoutOverlay({ blocks, scale, onSave, panelHost }: Layo
             );
 
           // View mode is a picture of the order: it must not eat a swipe or a
-          // tap that belongs to the page underneath.
-          if (mode === 'view') {
+          // tap that belongs to the page underneath. A tiny fix-mode outline is
+          // also only a picture; its equivalent full-size button lives in the
+          // panel list below.
+          if (mode === 'view' || isSmallBlock(block, scale)) {
             return (
               <div
                 key={block.blockId}
                 className={className}
                 style={box}
                 data-block-id={block.blockId}
-                data-order={String(number)}
+                data-order={number === null ? undefined : String(number)}
                 aria-hidden="true"
               >
                 {badge}
@@ -234,11 +284,7 @@ export default function LayoutOverlay({ blocks, scale, onSave, panelHost }: Layo
               style={box}
               data-block-id={block.blockId}
               data-order={number === null ? undefined : String(number)}
-              aria-label={
-                number === null
-                  ? `${GROUP_LABEL[group]} block, not tapped yet`
-                  : `${GROUP_LABEL[group]} block, position ${number} in the new order`
-              }
+              aria-label={blockLabel(group, number)}
               onClick={() => tap(block.blockId)}
             >
               {badge}

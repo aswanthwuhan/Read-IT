@@ -9,6 +9,7 @@ import WhatsNew from './components/WhatsNew';
 import LibraryPage from './pages/LibraryPage';
 import ReaderPage from './pages/ReaderPage';
 import SettingsPage from './pages/SettingsPage';
+import PwaUpdateBanner from './pwa/PwaUpdateBanner';
 
 /**
  * Navigation icons are inline SVG on purpose: no icon font, no sprite fetch, so
@@ -180,6 +181,7 @@ export default function App() {
         </nav>
       )}
 
+      <PwaUpdateBanner />
       {tutorialOpen ? <Tutorial opener={tutorialOpenerRef.current} onClose={() => setTutorialOpen(false)} /> : null}
       {whatsNewVersion ? <WhatsNew version={whatsNewVersion} onClose={() => setWhatsNewVersion(null)} /> : null}
     </div>

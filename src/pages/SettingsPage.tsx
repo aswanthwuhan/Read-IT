@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { CachePanel, LexiconPanel, VoicePanel, TTS_ENGINE_SETTING, TTS_RATE_SETTING } from '../tts/TtsSettings';
 import NeuralModelsPanel from '../tts/neural/NeuralModelsPanel';
@@ -26,7 +26,7 @@ const SECTIONS = [
   { id: 'reading', label: 'Reading aloud' },
   { id: 'voice-models', label: 'On-device models' },
   { id: 'pdf-layout', label: 'PDF layout' },
-  { id: 'pronunciation', label: 'Pronunciation' },
+  { id: 'pronunciation', label: 'Pronunciations' },
   { id: 'cached-audio', label: 'Cached audio' },
   { id: 'storage', label: 'Storage' },
   { id: 'backup', label: 'Backup' },
@@ -105,6 +105,9 @@ export default function SettingsPage() {
   const { hash } = useLocation();
   const [openId, setOpenId] = useState<string | null>(null);
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
+  const [updateCheckSaving, setUpdateCheckSaving] = useState(false);
+  const [updateCheckError, setUpdateCheckError] = useState(false);
+  const updateCheckSavingRef = useRef(false);
 
   const engine = useSetting<string>(TTS_ENGINE_SETTING, 'auto');
   const rate = storedNumber(useSetting<number>(TTS_RATE_SETTING, 1), 1);
@@ -121,6 +124,21 @@ export default function SettingsPage() {
   };
 
   const openRow = (id: string) => setOpenId(id);
+
+  const changeUpdateCheck = async (checked: boolean): Promise<void> => {
+    if (updateCheckSavingRef.current) return;
+    updateCheckSavingRef.current = true;
+    setUpdateCheckSaving(true);
+    setUpdateCheckError(false);
+    try {
+      await setSetting(UPDATE_CHECK_KEY, checked);
+    } catch {
+      setUpdateCheckError(true);
+    } finally {
+      updateCheckSavingRef.current = false;
+      setUpdateCheckSaving(false);
+    }
+  };
 
   // React Router writes tutorial URLs with pushState. Native in-page links
   // still use hashchange, so listen to both navigation paths.
@@ -216,7 +234,7 @@ export default function SettingsPage() {
           <RowGroup label="Speech details" id="speech">
             <Disclosure
               id="pronunciation"
-              title="Pronunciation"
+              title="Pronunciations"
               open={openId === 'pronunciation'}
               onToggle={() => toggle('pronunciation')}
             >
@@ -282,7 +300,8 @@ export default function SettingsPage() {
 
                 <p className="card-body about-copy">
                   Read IT is an offline ebook reader. Your books, highlights, notes and listening progress stay on this
-                  device. The optional update check contacts GitHub for release information. It sends no library data.
+                  device. System voices are provided by your device and may use a network connection. The optional
+                  update check contacts GitHub for release information. It sends no library data.
                 </p>
 
                 <label className="update-optin">
@@ -290,17 +309,22 @@ export default function SettingsPage() {
                     id="update-check"
                     type="checkbox"
                     checked={updateCheck}
+                    disabled={updateCheckSaving}
+                    aria-describedby={updateCheckError ? 'update-check-hint update-check-error' : 'update-check-hint'}
                     onChange={(event) => {
-                      // A failed write must not become an unhandled rejection;
-                      // the controlled checkbox reverts on the next render.
-                      void setSetting(UPDATE_CHECK_KEY, event.target.checked).catch(() => undefined);
+                      void changeUpdateCheck(event.target.checked);
                     }}
                   />
                   <span className="update-optin-text">
                     <span className="update-optin-label">Check for new versions when the app opens</span>
-                    <span className="field-hint">
+                    <span id="update-check-hint" className="field-hint">
                       Asks GitHub (api.github.com) for the latest Read IT release once a day. Nothing else is sent.
                     </span>
+                    {updateCheckError ? (
+                      <span id="update-check-error" className="update-optin-error" role="alert">
+                        Couldn’t save this choice. Please try again.
+                      </span>
+                    ) : null}
                   </span>
                 </label>
 

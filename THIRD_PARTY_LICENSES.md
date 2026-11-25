@@ -189,16 +189,20 @@ Columns:
 ### Pocket TTS voices that must never ship
 
 `cosette` (Expresso, CC-BY-4.0 **NC**) and `jean` (EARS, CC-BY-4.0 **NC**) are
-non-commercial. They are excluded from the app, from the model manifest and from the
-fallback list. The CI licence job fails if either appears in the manifest.
+non-commercial. They are excluded from the app's picker, synthesis allowlist and fixed
+default. The CI licence job fails if either is added to the static `NAMES` list.
 
-## Store and service components
+The upstream monolithic `voices.bin` fetched at runtime can still contain their tensors.
+Name filtering does not remove those bytes. A pruned, pinned voice asset and per-voice rights
+evidence are required before a commercial release; see `docs/POCKET-VOICES.md`.
 
-| Component | Terms | Where | Notes |
+## Planned store and service components (not in this release)
+
+| Component | Terms | Status | Notes |
 |---|---|---|---|
-| Google Mobile Ads SDK + UMP | Google AdSense/AdMob publisher terms | bundled | AdMob account required |
-| Apple StoreKit 2 | Apple Developer Program terms | bundled (iOS) | IAP product required |
-| Google Play Billing | Play Developer Agreement | bundled (Android) | service account required |
+| Google Mobile Ads SDK + UMP | Google AdSense/AdMob publisher terms | planned; not bundled | AdMob account required |
+| Apple StoreKit 2 | Apple Developer Program terms | planned; not bundled | IAP product required |
+| Google Play Billing | Play Developer Agreement | planned; not bundled | Play Console service account required |
 
 ## Prohibited
 

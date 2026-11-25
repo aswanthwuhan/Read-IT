@@ -175,8 +175,8 @@ public final class KokoroTtsEngine {
         // lasts > 0.2 s down to 20% of its length. Kokoro emits ~300 ms of leading silence and
         // a soft consonant onset (f/s/h/th) stays under 0.01, so the two form one run and the
         // onset is deleted — on every chunk, because each clause is a separate generate() call.
-        // 1f disables scaling entirely; do not lower this again (the inaudible edges are
-        // handled separately by AudioEdgeTrimmer at a much lower -60 dBFS threshold).
+        // 1f disables scaling entirely; do not lower this again. AudioEdgeTrimmer
+        // preserves the full lead and removes only exact digital zeros from the tail.
         config.setSilenceScale(1f);
 
         Log.i(TAG, String.format(Locale.US,
@@ -339,9 +339,10 @@ public final class KokoroTtsEngine {
         }
 
         // Silence scaling is off (see load()), so Kokoro keeps both its ~300 ms lead-in and
-        // its trailing silence on every clause. The reader concatenates clips back-to-back
-        // and adds no pause of its own, so trim only the inaudible edges here; the -60 dBFS
-        // threshold leaves a 0.006 soft attack untouched.
+        // its trailing silence on every clause. Never trim the lead: a quiet opening word can
+        // sit below any amplitude threshold. At the tail, remove only exact digital zeros;
+        // near-silent speech is preserved. The reader adds no pause between clips, so a short
+        // zero tail remains to keep pacing.
         samples = AudioEdgeTrimmer.trimSilentEdges(samples, generatedRate);
 
         byte[] wav = WavWriter.toBytes(samples, generatedRate);

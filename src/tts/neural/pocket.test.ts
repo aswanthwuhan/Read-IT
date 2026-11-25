@@ -21,20 +21,24 @@ const lib = vi.hoisted(() => ({
   destroyed: 0,
   /** Voice names the engine asked the library to load, in order. */
   voices: [] as string[],
+  /** Voice names supplied by the runtime bundle, including forbidden entries. */
+  runtimeVoices: ['alba', 'cosette', 'azelma'] as string[],
   /** How many generate() calls were in flight at once (the library allows one). */
   active: 0,
   maxActive: 0,
   /** Every text handed to generate(), in order. */
   texts: [] as string[],
+  /** Every voice handed to generate(), in order. */
+  generatedVoices: [] as string[],
   empty: false,
 }));
 
 vi.mock('pocket-tts-js', () => {
   class PocketTTS {
     ready = false;
-    // Two voices, first != last: a single-element list cannot tell "loaded the
-    // requested voice" from "fell back to the first one".
-    predefinedVoices = ['alba', 'cosette'];
+    // A forbidden voice sits between two allowed ones: filtering cannot rely on
+    // taking the first N entries or on the bundle keeping a safe order.
+    predefinedVoices = lib.runtimeVoices;
     sampleRate = 24000;
     options: Record<string, unknown>;
 
@@ -56,11 +60,12 @@ vi.mock('pocket-tts-js', () => {
 
     async generate(
       text: string,
-      opts: { onChunk?: (audio: Float32Array) => void }
+      opts: { voice?: string; onChunk?: (audio: Float32Array) => void }
     ): Promise<{ rtfx: number; genTime: number; audioDuration: number; stopped?: boolean }> {
       lib.active++;
       lib.maxActive = Math.max(lib.maxActive, lib.active);
       lib.texts.push(text);
+      if (opts.voice) lib.generatedVoices.push(opts.voice);
       await new Promise((resolve) => setTimeout(resolve, 5)); // inference takes a moment
       if (!lib.empty) opts.onChunk?.(new Float32Array([0.1, 0.2, 0.3, 0.4, 0.5]));
       lib.active--;
@@ -117,6 +122,8 @@ beforeEach(() => {
   lib.stopped = false;
   lib.destroyed = 0;
   lib.voices = [];
+  lib.runtimeVoices = ['alba', 'cosette', 'azelma'];
+  lib.generatedVoices = [];
   lib.active = 0;
   lib.maxActive = 0;
   lib.empty = false;
@@ -265,11 +272,14 @@ describe('voice identity', () => {
   });
 
   it('names the voice it will speak with, and a requested voice wins', async () => {
-    expect(await pocketEngine.cacheVariant?.()).toBe('default@chunked2');
+    expect(await pocketEngine.cacheVariant?.()).toBe('alba@chunked3');
     await setSetting(VOICE_KEY, 'alba');
-    expect(await pocketEngine.cacheVariant?.()).toBe('alba@chunked2');
+    expect(await pocketEngine.cacheVariant?.()).toBe('alba@chunked3');
     // The settings panel measures with the engine's own voice; that request decides.
-    expect(await pocketEngine.cacheVariant?.('cosette')).toBe('cosette@chunked2');
+    expect(await pocketEngine.cacheVariant?.('azelma')).toBe('azelma@chunked3');
+    // A restored or crafted non-commercial id resolves to the fixed safe default.
+    expect(await pocketEngine.cacheVariant?.('cosette')).toBe('alba@chunked3');
+    expect(await pocketEngine.cacheVariant?.('jean')).toBe('alba@chunked3');
   });
 
   it('gives the same sentence a different key after a voice change', async () => {
@@ -280,19 +290,68 @@ describe('voice identity', () => {
 
     await setSetting(VOICE_KEY, 'alba');
     const alba = await key();
-    expect(await key()).toBe(alba); // same voice: the clip is still valid
+    expect(await key()).toBe(alba); // same voice and build: the clip is still valid
 
-    await setSetting(VOICE_KEY, 'cosette');
+    await setSetting(VOICE_KEY, 'azelma');
     expect(await key()).not.toBe(alba);
   });
 
   it('renders in the voice the cache identity names', async () => {
-    // Keying `cosette` is only correct if the clip really is cosette — and `alba` is
-    // the list's first voice, so `voiceRef()`'s fallback cannot pass this test.
-    await setSetting(VOICE_KEY, 'cosette');
+    // Keying `azelma` is only correct if the clip really is azelma — and `alba` is
+    // the safe list's first voice, so `voiceRef()`'s fallback cannot pass this test.
+    await setSetting(VOICE_KEY, 'azelma');
     await pocketEngine.synthesize!('Metformin.', { rate: 1 });
 
-    expect(lib.voices).toEqual(['cosette']);
-    expect(await pocketEngine.cacheVariant?.()).toBe('cosette@chunked2');
+    expect(lib.voices).toEqual(['azelma']);
+    expect(lib.generatedVoices).toEqual(['azelma']);
+    expect(await pocketEngine.cacheVariant?.()).toBe('azelma@chunked3');
+  });
+
+  it('never lists or loads a non-commercial runtime voice', async () => {
+    await setSetting(VOICE_KEY, 'cosette');
+    await pocketEngine.prepare();
+
+    expect((await pocketEngine.listVoices()).map((voice) => voice.id)).toEqual(['alba', 'azelma']);
+    expect(lib.voices).toEqual(['alba']);
+    expect(await pocketEngine.cacheVariant?.()).toBe('alba@chunked3');
+  });
+
+  it('keeps the fixed default and picker order when runtime voices are reordered', async () => {
+    lib.runtimeVoices = ['azelma', 'cosette', 'alba'];
+    await pocketEngine.prepare();
+
+    expect(lib.voices).toEqual(['alba']);
+    expect((await pocketEngine.listVoices()).map((voice) => voice.id)).toEqual(['alba', 'azelma']);
+    expect(await pocketEngine.cacheVariant?.()).toBe('alba@chunked3');
+  });
+
+  it('fails closed when an allowlisted requested voice is missing', async () => {
+    lib.runtimeVoices = ['alba', 'cosette'];
+    await setSetting(VOICE_KEY, 'azelma');
+
+    await expect(pocketEngine.synthesize!('Metformin.', { rate: 1 })).rejects.toThrow(
+      'Pocket TTS voice "azelma" is unavailable',
+    );
+    expect(lib.voices).toEqual([]);
+    // No clip can be cached under azelma because synthesis never used that voice.
+    expect(await pocketEngine.cacheVariant?.()).toBe('azelma@chunked3');
+  });
+
+  it('fails clearly when the runtime bundle contains only forbidden voices', async () => {
+    lib.runtimeVoices = ['cosette', 'jean'];
+
+    await expect(pocketEngine.prepare()).rejects.toThrow(
+      'Pocket TTS default voice "alba" is unavailable',
+    );
+    expect(lib.voices).toEqual([]);
+    expect(await pocketEngine.listVoices()).toEqual([]);
+  });
+
+  it('uses the safe default for an explicitly requested forbidden voice', async () => {
+    await pocketEngine.synthesize!('Metformin.', { rate: 1, voiceId: 'jean' });
+
+    expect(lib.voices).toEqual(['alba']);
+    expect(lib.generatedVoices).toEqual(['alba']);
+    expect(await pocketEngine.cacheVariant?.('jean')).toBe('alba@chunked3');
   });
 });

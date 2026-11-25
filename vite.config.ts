@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Plugin } from 'vite';
 import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import packageJson from './package.json' with { type: 'json' };
+import { runtimeCacheCleanupSource, runtimeCacheNames } from './src/pwa/cacheNames.js';
 
 // GitHub Pages serves the PWA from /Read-IT/; dev, Capacitor and Tauri need '/'.
 // The build workflow sets VITE_BASE=/Read-IT/ at build time.
@@ -35,9 +39,45 @@ const lexiconVersion = assetVersion([
   'public/lexicon/us_gold.json',
   'public/lexicon/en-us.tsv',
 ]);
+const runtimeCaches = runtimeCacheNames(ortVersion, lexiconVersion);
+// vite-plugin-pwa owns Workbox, but pnpm does not expose its transitive
+// workbox-window package at the app root. Alias the virtual register's import to
+// the copy already installed beside the plugin (no new dependency).
+const requireFromPwa = createRequire(import.meta.resolve('vite-plugin-pwa'));
+const workboxWindowEntry = requireFromPwa.resolve('workbox-window');
+
+/**
+ * Workbox expires entries inside a named cache, but changing cacheName leaves
+ * the previous cache behind. Append a narrow activation cleanup after Workbox
+ * has written sw.js; both this listener and runtimeCaching use runtimeCaches.
+ */
+function runtimeCacheCleanupPlugin(current: ReturnType<typeof runtimeCacheNames>): Plugin {
+  let root = process.cwd();
+  let outDir = 'dist';
+
+  return {
+    name: 'readit:runtime-cache-cleanup',
+    apply: 'build',
+    configResolved(config) {
+      root = config.root;
+      outDir = config.build.outDir;
+    },
+    closeBundle: {
+      sequential: true,
+      order: 'post',
+      handler(error) {
+        if (error) return;
+        const swPath = resolve(root, outDir, 'sw.js');
+        if (!existsSync(swPath)) return;
+        appendFileSync(swPath, runtimeCacheCleanupSource(current), 'utf8');
+      },
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => ({
   base,
+  resolve: { alias: { 'workbox-window': workboxWindowEntry } },
   // Pinned so a Vite upgrade cannot silently raise the floor. iOS 15.4 is the
   // oldest Safari pdf.js runs on (structuredClone, Object.hasOwn); Chrome 110 is
   // the oldest Android WebView supported (see src/import/pdfPolyfill.ts).
@@ -50,7 +90,10 @@ export default defineConfig(({ mode }) => ({
     VitePWA({
       // native shell bundles its own assets; a service worker there would serve stale code after app updates
       disable: mode === 'native',
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
+      // The app owns the prompt through virtual:pwa-register; never inject a
+      // second registration that could reload without asking the reader.
+      injectRegister: false,
       includeAssets: ['icon.svg', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'Read IT',
@@ -75,26 +118,42 @@ export default defineConfig(({ mode }) => ({
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // pdfjs/: decoders, standard fonts and the CMYK profile (~1.2 MB), so Page view works offline
         globPatterns: ['**/*.{js,css,html,woff2}', 'pdfjs/**/*.{wasm,pfb,ttf,icc}'],
+        // Worker JavaScript stays precached. Weights and stable-URL runtime
+        // assets do not: they are large and have their own versioned caches.
+        globIgnores: [
+          '**/*.{bin,onnx,safetensors,gguf}',
+          'ort/**',
+          '**/ort-*',
+          'lexicon/**',
+          '**/lexicon-*',
+        ],
         // SPA deep links (e.g. /Read-IT/read/abc on reload) must land on the shell.
         navigateFallback: `${base}index.html`,
         // onnxruntime-web wasm (~22 MB) is too big to precache; cache on first use so later launches work offline.
         runtimeCaching: [
           {
-            // matches <base>ort/ wherever the app is mounted
-            urlPattern: ({ url }) => url.pathname.includes('/ort/'),
+            // matches only this app's same-origin <base>ort/ assets
+            urlPattern: ({ url }) => {
+              const scope = new URL((self as unknown as { registration: { scope: string } }).registration.scope);
+              return url.origin === scope.origin && url.pathname.startsWith(new URL('ort/', scope).pathname);
+            },
             handler: 'CacheFirst',
-            options: { cacheName: `ort-runtime-${ortVersion}`, expiration: { maxEntries: 10 } },
+            options: { cacheName: runtimeCaches.ort, expiration: { maxEntries: 10 } },
           },
           {
             // The 10.9 MB G2P lexicon is fetched at runtime; keep it for offline
             // Kokoro even though it is too large for the 5 MB precache budget.
-            urlPattern: ({ url }) => url.pathname.includes('/lexicon/'),
+            urlPattern: ({ url }) => {
+              const scope = new URL((self as unknown as { registration: { scope: string } }).registration.scope);
+              return url.origin === scope.origin && url.pathname.startsWith(new URL('lexicon/', scope).pathname);
+            },
             handler: 'CacheFirst',
-            options: { cacheName: `g2p-lexicon-${lexiconVersion}`, expiration: { maxEntries: 3 } },
+            options: { cacheName: runtimeCaches.lexicon, expiration: { maxEntries: 3 } },
           },
         ],
       },
     }),
+    ...(mode === 'native' ? [] : [runtimeCacheCleanupPlugin(runtimeCaches)]),
   ],
   // pocket-tts-js spawns its worker via new URL(import.meta.url); esbuild pre-bundling breaks that path
   optimizeDeps: { exclude: ['pocket-tts-js'] },
@@ -102,7 +161,13 @@ export default defineConfig(({ mode }) => ({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test-setup.ts'],
-    // Scratch work under .tmp/ must never leak into the suite.
-    exclude: [...configDefaults.exclude, '.tmp/**'],
+    // Scratch work under .tmp/ must never leak into the suite. Node-only script
+    // tests use node:test and are run by their own package scripts, not Vitest.
+    exclude: [...configDefaults.exclude, '.tmp/**', 'scripts/**'],
+    // jsdom-heavy suites need real process isolation. vmThreads is not compatible
+    // with the current setup, and an unbounded pool exhausts smaller CI runners.
+    pool: 'forks',
+    isolate: true,
+    maxWorkers: 2,
   },
 }));

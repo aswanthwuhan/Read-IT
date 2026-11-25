@@ -1,0 +1,63 @@
+name: Android JVM unit tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-unit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # packageManager pins the exact pnpm release.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Fetches the SHA-256-pinned native libraries, builds the Capacitor web
+      # bundle without a service worker, and copies it into the Android project.
+      - name: Sync Android dependencies and web assets
+        run: pnpm android:sync
+        timeout-minutes: 25
+
+      - name: Android JVM unit tests
+        working-directory: android
+        run: ./gradlew testDebugUnitTest --no-daemon --max-workers=2
+        timeout-minutes: 15
+
+      - name: Upload JVM test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unit-test-reports
+          path: |
+            android/app/build/reports/tests/testDebugUnitTest/
+            android/app/build/test-results/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 14

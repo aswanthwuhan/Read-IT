@@ -149,6 +149,55 @@
   color: var(--text);
 }
 
+.smallBlockTitle {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+}
+
+.smallBlockList {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The outline keeps its printed geometry; a block too small to tap accurately
+   gets this equivalent control at the 48px comfort size. The element selector
+   keeps the shared .btn rule from shrinking it back to 44px. */
+button.smallBlock {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 48px;
+  min-height: 48px;
+  padding: var(--space-2) var(--space-3);
+  justify-content: flex-start;
+  text-align: left;
+}
+
+button.smallBlock[data-picked='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.listNumber {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  min-width: 24px;
+  height: 24px;
+  padding-inline: var(--space-1);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;

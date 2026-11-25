@@ -74,6 +74,30 @@ describe('SelectionBar', () => {
     act(() => root.unmount());
   });
 
+  it('lets Escape cancel the note without closing the selection toolbar', () => {
+    const { container, root, props } = renderBar();
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    act(() => {
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Note')?.click();
+    });
+    const note = container.querySelector<HTMLTextAreaElement>('#rd-note')!;
+    expect(document.activeElement).toBe(note);
+
+    act(() => {
+      note.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+
+    expect(props.onClose).not.toHaveBeenCalled();
+    expect(container.querySelector('#rd-note')).toBeNull();
+    expect(document.activeElement).toBe(dialog);
+
+    act(() => {
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Note')?.click();
+    });
+    expect(container.querySelector<HTMLTextAreaElement>('#rd-note')?.value).toBe('');
+    act(() => root.unmount());
+  });
+
   it('reports the chosen colour and then the note', async () => {
     const { container, root, props } = renderBar();
 

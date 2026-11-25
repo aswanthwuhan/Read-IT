@@ -109,20 +109,12 @@ jobs:
       - name: Set up pnpm (local build)
         if: env.IOS_SIM_BUILD == 'true'
         uses: pnpm/action-setup@v4
-        with:
-          version: 12
 
       - name: Build the checked-out commit (local build)
         if: env.IOS_SIM_BUILD == 'true'
         run: |
           set -o pipefail
-          # --frozen-lockfile is the contract; a working tree whose package.json has
-          # moved ahead of pnpm-lock.yaml still gets tested, loudly, instead of
-          # failing the whole run before Safari is ever opened.
-          if ! pnpm install --frozen-lockfile; then
-            echo "::warning::pnpm install --frozen-lockfile failed: the lockfile is out of date with this commit. Installing without it; the lockfile change stays on the runner."
-            pnpm install --no-frozen-lockfile
-          fi
+          pnpm install --frozen-lockfile
           VITE_BASE=/readit/ pnpm build
           cp dist/index.html dist/404.html
           ls -la dist | head -30
@@ -137,7 +129,7 @@ jobs:
           # every /readit/ URL 404s.
           # Bind every IPv4 interface: the simulator shares this Mac's loopback, and
           # a listener on ::1 only would refuse a localhost that resolves to IPv4.
-          VITE_BASE=/readit/ nohup npx vite preview --port 4173 --strictPort --host 0.0.0.0 \
+          VITE_BASE=/readit/ nohup pnpm exec vite preview --port 4173 --strictPort --host 0.0.0.0 \
             > "$IOS_SIM_ARTIFACTS/vite-preview.log" 2>&1 &
           echo $! > "$IOS_SIM_ARTIFACTS/vite-preview.pid"
           for attempt in $(seq 1 60); do
@@ -265,7 +257,7 @@ jobs:
         run: |
           if [ -f "$IOS_SIM_ARTIFACTS/appium.pid" ]; then kill "$(cat "$IOS_SIM_ARTIFACTS/appium.pid")" 2>/dev/null || true; fi
           if [ -f "$IOS_SIM_ARTIFACTS/safaridriver.pid" ]; then kill "$(cat "$IOS_SIM_ARTIFACTS/safaridriver.pid")" 2>/dev/null || true; fi
-          # npx is the parent of the real vite process, so kill the whole pattern too.
+          # pnpm exec is the parent of the real vite process, so kill the whole pattern too.
           if [ -f "$IOS_SIM_ARTIFACTS/vite-preview.pid" ]; then kill "$(cat "$IOS_SIM_ARTIFACTS/vite-preview.pid")" 2>/dev/null || true; fi
           pkill -f "vite preview --port 4173" 2>/dev/null || true
 

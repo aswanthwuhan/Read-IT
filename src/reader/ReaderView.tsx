@@ -5,7 +5,17 @@
  * everything here: which chapter is shown, which sentence is highlighted, where
  * playback starts and what `lastPos` stores.
  */
-import { Suspense, lazy, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import {
+  Suspense,
+  lazy,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../core/db';
@@ -183,6 +193,11 @@ export default function ReaderView() {
   const [pdfPage, setPdfPage] = useState(1);
   const [drawer, setDrawer] = useState<'none' | 'toc' | 'notes'>('none');
   const drawerOpen = drawer !== 'none';
+  const drawerId = useId();
+  const chaptersTabId = `${drawerId}-chapters-tab`;
+  const notesTabId = `${drawerId}-notes-tab`;
+  const chaptersPanelId = `${drawerId}-chapters-panel`;
+  const notesPanelId = `${drawerId}-notes-panel`;
   const [typeOpen, setTypeOpen] = useState(false);
   const [selection, setSelection] = useState<Picked | null>(null);
   /** Non-null from "Play selection" until the passage ends or playback restarts. */
@@ -338,6 +353,11 @@ export default function ReaderView() {
     });
     void db.books.update(pending.bookId, { lastPos: pending.pos }).catch(() => {
       // The position is a convenience; a failed write must never break reading.
+    });
+    // Keep the lightweight shelf index in sync when the settings copy succeeds
+    // but the heavy book write does not (or fails later in the same flush).
+    void db.bookSummaries.update(pending.bookId, { lastPos: pending.pos }).catch(() => {
+      // A missing summary is repaired lazily from the authoritative book row.
     });
   }
 
@@ -1539,6 +1559,24 @@ export default function ReaderView() {
     setDrawer('none');
   }
 
+  /** Horizontal tab keyboard behavior: arrows wrap, Home/End jump to an edge. */
+  function moveDrawerTab(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    const { key } = event;
+    if (key !== 'ArrowLeft' && key !== 'ArrowRight' && key !== 'Home' && key !== 'End') return;
+    const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    if (tabs.length === 0) return;
+    const focused = tabs.indexOf(event.target as HTMLButtonElement);
+    const current = focused < 0 ? (drawer === 'toc' ? 0 : 1) : focused;
+    let next = current;
+    if (key === 'ArrowRight') next = (current + 1) % tabs.length;
+    else if (key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
+    else if (key === 'Home') next = 0;
+    else if (key === 'End') next = tabs.length - 1;
+    event.preventDefault();
+    setDrawer(next === 0 ? 'toc' : 'notes');
+    tabs[next]?.focus();
+  }
+
   // -- lock-screen controls ------------------------------------------------
 
   const actions = useRef({ play: startOrResume, pause: pauseOnly, step, stop: stopPlayback });
@@ -1671,7 +1709,8 @@ export default function ReaderView() {
       if (event.key !== 'Tab') return;
       const body = sheetBody.current;
       if (!body) return;
-      const focusable = [...body.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])')];
+      const focusable = [...body.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [href], [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => element.tabIndex >= 0 && !element.closest('[hidden]'));
       if (focusable.length === 0) return;
       const first = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
@@ -2162,25 +2201,38 @@ export default function ReaderView() {
           }}
         >
           <div className="rd-sheet-body sheet" ref={sheetBody} tabIndex={-1}>
-            <div className="rd-tabs" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={drawer === 'toc'}
-                className={drawer === 'toc' ? 'rd-tab active' : 'rd-tab'}
-                onClick={() => setDrawer('toc')}
+            <div className="rd-tabs-row">
+              <div
+                className="rd-tabs"
+                role="tablist"
+                aria-label="Chapters and notes sections"
+                onKeyDown={moveDrawerTab}
               >
-                Chapters
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={drawer === 'notes'}
-                className={drawer === 'notes' ? 'rd-tab active' : 'rd-tab'}
-                onClick={() => setDrawer('notes')}
-              >
-                Notes
-              </button>
+                <button
+                  id={chaptersTabId}
+                  type="button"
+                  role="tab"
+                  aria-selected={drawer === 'toc'}
+                  aria-controls={chaptersPanelId}
+                  tabIndex={drawer === 'toc' ? 0 : -1}
+                  className={drawer === 'toc' ? 'rd-tab active' : 'rd-tab'}
+                  onClick={() => setDrawer('toc')}
+                >
+                  Chapters
+                </button>
+                <button
+                  id={notesTabId}
+                  type="button"
+                  role="tab"
+                  aria-selected={drawer === 'notes'}
+                  aria-controls={notesPanelId}
+                  tabIndex={drawer === 'notes' ? 0 : -1}
+                  className={drawer === 'notes' ? 'rd-tab active' : 'rd-tab'}
+                  onClick={() => setDrawer('notes')}
+                >
+                  Notes
+                </button>
+              </div>
               <button
                 type="button"
                 className="btn btn-ghost btn-icon rd-tab-close"
@@ -2190,7 +2242,14 @@ export default function ReaderView() {
                 <Glyph>{icons.close}</Glyph>
               </button>
             </div>
-            {drawer === 'toc' ? (
+            <div
+              id={chaptersPanelId}
+              className="rd-tab-panel"
+              role="tabpanel"
+              aria-labelledby={chaptersTabId}
+              tabIndex={0}
+              hidden={drawer !== 'toc'}
+            >
               <ol className="rd-toc">
                 {book.parsed.chapters.map((entry, i) => (
                   <li key={entry.id}>
@@ -2207,9 +2266,17 @@ export default function ReaderView() {
                   </li>
                 ))}
               </ol>
-            ) : (
-              <HighlightList bookId={book.id} onJump={jumpTo} />
-            )}
+            </div>
+            <div
+              id={notesPanelId}
+              className="rd-tab-panel"
+              role="tabpanel"
+              aria-labelledby={notesTabId}
+              tabIndex={0}
+              hidden={drawer !== 'notes'}
+            >
+              {drawer === 'notes' ? <HighlightList bookId={book.id} onJump={jumpTo} /> : null}
+            </div>
           </div>
         </div>
       ) : null}

@@ -8,7 +8,7 @@
  * This module is loaded lazily (only for PDF books in page mode) because
  * pdfjs-dist is by far the heaviest dependency in the app.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 // pdf.js 6's default build calls ES2025 helpers the phone's WebView does not
 // have (every import crashed with "a.toHex is not a function" on WebView 134);
 // the polyfills and the official legacy build are the fix — see pdfPolyfill.ts.
@@ -17,7 +17,20 @@ import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist/legacy/build/pdf.mj
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import workerUrl from '../import/pdfWorker?worker&url';
 import { MISSING_FILE_MESSAGE, fileMissing } from '../import';
-import { PDF_ASSETS } from '../import/pdfAssets';
+import {
+  PDF_ASSETS,
+  PDFJS_DOCUMENT_OPTIONS,
+  PDF_READER_CANVAS_MAX_DIMENSION,
+  PDF_READER_CANVAS_MAX_PIXELS,
+  PDF_INVALID_VIEWPORT_MESSAGE,
+  PDF_TEXT_MAX_CHARS_PER_PAGE,
+  PDF_TEXT_MAX_ITEMS_PER_PAGE,
+  getValidatedPdfViewport,
+  isFiniteRect,
+  isPdfTextItem,
+  readPdfTextItems,
+  type PdfRawTextItem,
+} from '../import/pdfAssets';
 import type { PdfRect } from '../core/types';
 import type { PageBlock } from './blockOrder';
 import LayoutOverlay from './LayoutOverlay';
@@ -53,6 +66,50 @@ const ZOOM_MIN = 0.6;
 const ZOOM_MAX = 3;
 /** The narrowest a fitted page may be and still read as a page (CSS px). */
 const MIN_PAGE_PX = 360;
+const MAX_DEVICE_DPR = 2;
+
+/**
+ * Effective render scale after the backing-store caps. It falls below one for
+ * a very large zoom: the CSS page stays sharp in layout terms without asking
+ * the WebView for an unbounded bitmap.
+ */
+export function canvasBackingRatio(width: number, height: number, devicePixelRatio: number): number {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || !(width > 0) || !(height > 0)) return 0;
+  const area = width * height;
+  if (!Number.isFinite(area) || !(area > 0)) return 0;
+  const requested =
+    Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? Math.min(devicePixelRatio, MAX_DEVICE_DPR) : 1;
+  return Math.min(
+    requested,
+    PDF_READER_CANVAS_MAX_DIMENSION / width,
+    PDF_READER_CANVAS_MAX_DIMENSION / height,
+    Math.sqrt(PDF_READER_CANVAS_MAX_PIXELS / area),
+  );
+}
+
+export function canvasBackingSize(
+  width: number,
+  height: number,
+  devicePixelRatio: number,
+): { width: number; height: number; ratio: number } {
+  const ratio = canvasBackingRatio(width, height, devicePixelRatio);
+  if (!(ratio > 0)) return { width: 0, height: 0, ratio: 0 };
+  return {
+    width: Math.min(PDF_READER_CANVAS_MAX_DIMENSION, Math.max(1, Math.floor(width * ratio))),
+    height: Math.min(PDF_READER_CANVAS_MAX_DIMENSION, Math.max(1, Math.floor(height * ratio))),
+    ratio,
+  };
+}
+
+function validOverlayRect(rect: PdfRect, scale = 1): boolean {
+  if (!Number.isInteger(rect.page) || !isFiniteRect(rect)) return false;
+  if (!Number.isFinite(scale) || !(scale > 0)) return false;
+  const left = rect.x * scale;
+  const top = rect.y * scale;
+  const width = Math.max(rect.w * scale, 2);
+  const height = Math.max(rect.h * scale, 2);
+  return [left, top, width, height, left + width, top + height].every(Number.isFinite);
+}
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -62,6 +119,34 @@ function touchDistance(touches: ArrayLike<{ clientX: number; clientY: number }>)
   const [a, b] = [touches[0], touches[1]];
   if (!a || !b) return 0;
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+}
+
+/** Turn pdf.js text items into readable prose without inventing missing words. */
+function readablePageText(content: Iterable<PdfRawTextItem>): string {
+  let text = '';
+  let spaceBefore = false;
+  for (const item of content) {
+    if (!isPdfTextItem(item)) continue;
+    if (!item.str.trim()) {
+      // pdf.js can report the gap between font runs as a whitespace-only item.
+      // Preserve that gap, but never insert spaces inside a split word.
+      if (item.hasEOL) {
+        if (text && !text.endsWith('\n')) text += '\n';
+        spaceBefore = false;
+      } else {
+        spaceBefore ||= item.str.length > 0;
+      }
+      continue;
+    }
+    text += spaceBefore && !/^\s/.test(item.str) ? ` ${item.str}` : item.str;
+    spaceBefore = false;
+    if (item.hasEOL && !text.endsWith('\n')) text += '\n';
+  }
+  return text
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export default function PdfView({
@@ -91,6 +176,8 @@ export default function PdfView({
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pageText, setPageText] = useState<{ page: number; text: string; failed: boolean } | null>(null);
+  const pageTextId = useId();
   // The reading-order overlay is an inspection tool, not a preference: it is
   // off whenever page view opens, and it is never stored.
   const [layout, setLayout] = useState(false);
@@ -111,14 +198,32 @@ export default function PdfView({
 
   /** The page number that is actually painted (the prop may be out of range). */
   const painted = pageCount > 0 ? clampNumber(page, 1, pageCount) : page;
+  const currentPageText = pageText?.page === painted ? pageText : null;
+  const visibleLayoutBlocks = layoutBlocks.filter((block) => isFiniteRect(block.box, true));
+  const pageDescription =
+    error && !doc
+      ? 'Page text is unavailable because the PDF could not be opened.'
+      : currentPageText
+        ? currentPageText.failed
+          ? 'Page text could not be extracted. This page may be a scan or image-only PDF.'
+          : currentPageText.text || 'No readable text was found on this page. It may be a scan or image-only PDF.'
+        : 'Extracting page text…';
 
   // Load the document once; the pages are rendered on demand below.
   useEffect(() => {
     let alive = true;
     let loadingTask: ReturnType<typeof getDocument> | null = null;
+    const element = canvas.current;
+    if (element) {
+      element.width = 0;
+      element.height = 0;
+    }
     setDoc(null);
     setPageCount(0);
+    setPageText(null);
     setError(null);
+    setScale(0);
+    setSize({ w: 0, h: 0 });
     // A book imported before an app update kept the picker's File handle, which
     // reads back as zero bytes (see `ownedCopy`). pdf.js can only answer that
     // with "The PDF file is empty, size zero bytes", which does not tell the
@@ -132,7 +237,7 @@ export default function PdfView({
     void (async () => {
       const data = new Uint8Array(await fileRef.current.arrayBuffer());
       if (!alive) return;
-      loadingTask = getDocument({ data, ...PDF_ASSETS });
+      loadingTask = getDocument({ data, ...PDF_ASSETS, ...PDFJS_DOCUMENT_OPTIONS });
       const loaded = await loadingTask.promise;
       if (!alive) {
         void loadingTask.destroy();
@@ -153,6 +258,10 @@ export default function PdfView({
       // should not keep a full-page canvas alive after the reader leaves.
       renderTask.current?.cancel();
       renderTask.current = null;
+      if (element) {
+        element.width = 0;
+        element.height = 0;
+      }
       const last = shownPage.current;
       shownPage.current = null;
       try {
@@ -163,6 +272,41 @@ export default function PdfView({
       void loadingTask?.destroy();
     };
   }, [docKey]);
+
+  // The canvas is an image to assistive technology. Keep its label short and
+  // describe it with the page's own extracted text; a scan gets an honest
+  // fallback rather than a label that pretends the words are available.
+  useEffect(() => {
+    let cancelled = false;
+    setPageText(null);
+    if (!doc) return;
+    const pageNumber = clampNumber(page, 1, doc.numPages);
+
+    void (async () => {
+      try {
+        const pdfPage = await doc.getPage(pageNumber);
+        const items: PdfRawTextItem[] = [];
+        await readPdfTextItems(
+          pdfPage,
+          { maxItems: PDF_TEXT_MAX_ITEMS_PER_PAGE, maxChars: PDF_TEXT_MAX_CHARS_PER_PAGE, pageNumber },
+          (item) => items.push(item),
+        );
+        if (cancelled) return;
+        setPageText({ page: pdfPage.pageNumber, text: readablePageText(items), failed: false });
+      } catch {
+        if (cancelled) return;
+        setPageText({
+          page: pageNumber,
+          text: 'Page text could not be extracted. This page may be a scan or image-only PDF.',
+          failed: true,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, docKey, page]);
 
   // Free the full-page bitmap when the reader leaves. This effect has to own
   // its element: React detaches refs before passive cleanups, so looking at
@@ -242,8 +386,8 @@ export default function PdfView({
     const element = wrap.current;
     // Nothing is painted yet at the initial scale of 1 and a zero-size page:
     // scrolling then would be undone by the first real fit a frame later.
-    if (!element || scale <= 0 || size.h <= 0) return;
-    const first = rects.find((rect) => rect.page === painted);
+    if (!element || !Number.isFinite(scale) || scale <= 0 || size.h <= 0) return;
+    const first = rects.find((rect) => rect.page === painted && validOverlayRect(rect, scale));
     if (!first) return;
     const margin = Math.min(48, element.clientHeight * 0.1);
     const top = first.y * scale;
@@ -267,8 +411,9 @@ export default function PdfView({
   // Paint the page whenever the document, page, zoom or width changes.
   useEffect(() => {
     const element = canvas.current;
-    if (!doc || !element || width <= 0) return;
+    if (!doc || !element || !Number.isFinite(width) || width <= 0) return;
     let cancelled = false;
+    let task: ReturnType<PDFPageProxy['render']> | null = null;
 
     void (async () => {
       try {
@@ -287,11 +432,13 @@ export default function PdfView({
           if (cancelled) return;
         }
 
-        const base = pdfPage.getViewport({ scale: 1 });
+        const base = getValidatedPdfViewport(pdfPage, 1);
         // Measure again at paint time: the `width` in state is what triggered
         // this run, but a box that grew since then must not be painted small.
-        const availableWidth = wrap.current?.clientWidth || width;
-        const availableHeight = wrap.current?.clientHeight || height;
+        const measuredWidth = wrap.current?.clientWidth || width;
+        const measuredHeight = wrap.current?.clientHeight || height;
+        const availableWidth = Number.isFinite(measuredWidth) && measuredWidth > 0 ? measuredWidth : width;
+        const availableHeight = Number.isFinite(measuredHeight) && measuredHeight > 0 ? measuredHeight : 0;
         const widthFit = availableWidth / base.width;
         // "Fit page": the smaller of the two fits, so a portrait sheet is shown
         // complete inside the box. Fitting only the width is what cropped the
@@ -304,8 +451,16 @@ export default function PdfView({
         const pageReads = pageFit >= Math.min(widthFit * 0.85, MIN_PAGE_PX / base.width);
         const fitPage = fit === 'page' || (fit === 'auto' && (fullscreen || pageReads));
         const baseFit = fitPage ? pageFit : widthFit;
-        const viewport = pdfPage.getViewport({ scale: baseFit * zoom });
-        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        if (!Number.isFinite(baseFit) || !(baseFit > 0)) {
+          throw new Error(PDF_INVALID_VIEWPORT_MESSAGE);
+        }
+        // The scale-1 page passed the strict budget above. Zoom may legitimately
+        // exceed it; the backing-store cap, not a CSS-size rejection, handles that.
+        const viewport = getValidatedPdfViewport(pdfPage, baseFit * zoom, Number.MAX_SAFE_INTEGER, Number.MAX_VALUE);
+        const backing = canvasBackingSize(viewport.width, viewport.height, window.devicePixelRatio);
+        if (!(backing.ratio > 0)) {
+          throw new Error(PDF_INVALID_VIEWPORT_MESSAGE);
+        }
 
         // Publish the geometry *before* painting, so the sentence overlay is
         // never drawn at the previous page's scale.
@@ -314,15 +469,19 @@ export default function PdfView({
         setSize({ w: viewport.width, h: viewport.height });
 
         renderTask.current?.cancel();
-        element.width = Math.floor(viewport.width * ratio);
-        element.height = Math.floor(viewport.height * ratio);
+        // Assigning the new size clears the old bitmap, but zeroing first also
+        // releases it before the WebView allocates the replacement.
+        element.width = 0;
+        element.height = 0;
+        element.width = backing.width;
+        element.height = backing.height;
         const context = element.getContext('2d');
         if (!context) throw new Error('The PDF page could not open a drawing surface.');
-        const task = pdfPage.render({
+        task = pdfPage.render({
           canvas: element,
           canvasContext: context,
           viewport,
-          transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
+          transform: backing.ratio === 1 ? undefined : [backing.ratio, 0, 0, backing.ratio, 0, 0],
         });
         renderTask.current = task;
         await task.promise;
@@ -343,7 +502,13 @@ export default function PdfView({
         // Cancelling a render is normal when the reader turns pages quickly.
         const name = err instanceof Error ? err.name : '';
         if (cancelled || name === 'RenderingCancelledException') return;
+        element.width = 0;
+        element.height = 0;
+        setScale(0);
+        setSize({ w: 0, h: 0 });
         setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (task && renderTask.current === task) renderTask.current = null;
       }
     })();
 
@@ -411,11 +576,15 @@ export default function PdfView({
             className="rd-pdf-canvas"
             role="img"
             aria-label={`Page ${painted}${pageCount ? ` of ${pageCount}` : ''}`}
+            aria-describedby={pageTextId}
             style={{ width: size.w || undefined, height: size.h || undefined }}
           />
-          {scale > 0
+          <p id={pageTextId} className="visually-hidden">
+            {pageDescription}
+          </p>
+          {Number.isFinite(scale) && scale > 0
             ? rects
-                .filter((rect) => rect.page === painted)
+                .filter((rect) => rect.page === painted && validOverlayRect(rect, scale))
                 .map((rect, i) => (
                   <div
                     key={`${rect.page}-${i}`}
@@ -430,9 +599,9 @@ export default function PdfView({
                   />
                 ))
             : null}
-          {scale > 0
+          {Number.isFinite(scale) && scale > 0
             ? (wordRects ?? [])
-                .filter((rect) => rect.page === painted)
+                .filter((rect) => rect.page === painted && validOverlayRect(rect, scale))
                 .map((rect, i) => (
                   <div
                     key={`w-${rect.page}-${i}`}
@@ -447,9 +616,9 @@ export default function PdfView({
                   />
                 ))
             : null}
-          {scale > 0 && layout && onSaveOrder ? (
+          {Number.isFinite(scale) && scale > 0 && layout && onSaveOrder ? (
             <LayoutOverlay
-              blocks={layoutBlocks}
+              blocks={visibleLayoutBlocks}
               scale={scale}
               onSave={onSaveOrder}
               panelHost={readingOrderBar}
@@ -503,7 +672,7 @@ export default function PdfView({
           onClick={() => setLayout((value) => !value)}
           // Nothing to show on a page without blocks, but a toggle that is
           // already on has to stay tappable or it can never be turned off.
-          disabled={pageCount === 0 || !onSaveOrder || (!layout && layoutBlocks.length === 0)}
+          disabled={pageCount === 0 || !onSaveOrder || (!layout && visibleLayoutBlocks.length === 0)}
         >
           Layout
         </button>

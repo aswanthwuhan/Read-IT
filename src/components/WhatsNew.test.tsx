@@ -3,11 +3,16 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installBackBridge } from '../core/backButton';
 import { db } from '../core/db';
-import { getSetting } from '../core/settings';
+import { getSetting, setSetting } from '../core/settings';
 import { changelogSection } from '../core/version';
 import WhatsNew from './WhatsNew';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock('../core/settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../core/settings')>();
+  return { ...actual, setSetting: vi.fn(actual.setSetting) };
+});
 
 let container: HTMLDivElement;
 let root: Root | null = null;
@@ -67,6 +72,7 @@ async function openSheet(): Promise<HTMLButtonElement> {
 
 beforeEach(async () => {
   closed = 0;
+  vi.mocked(setSetting).mockClear();
   await db.delete();
   await db.open();
   container = document.createElement('div');
@@ -186,6 +192,60 @@ describe('WhatsNew', () => {
     expect(container.querySelector('.whatsnew-note')?.textContent).toContain('Update checks are on');
     expect(await getSetting('app.updateCheck', false)).toBe(true);
     expect(sheetButton('Got it')?.className).toContain('btn-primary');
+  });
+
+  it('waits for persistence before confirming the update opt-in', async () => {
+    await openSheet();
+    let finish!: () => void;
+    const saved = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.mocked(setSetting).mockImplementationOnce(() => saved);
+
+    const tellMe = sheetButton('Tell me about updates')!;
+    await act(async () => {
+      tellMe.click();
+      tellMe.click();
+    });
+
+    expect(setSetting).toHaveBeenCalledTimes(1);
+    expect(setSetting).toHaveBeenCalledWith('app.updateCheck', true);
+    expect(sheetButton('Turning on…')?.disabled).toBe(true);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(closed).toBe(0);
+    expect(await getSetting('app.updateCheck', false)).toBe(false);
+
+    await act(async () => finish());
+    await waitFor(() => container.querySelector('[role="status"]') !== null, 'confirmation line');
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('Update checks are on');
+  });
+
+  it('keeps the update opt-in available and explains a failed save', async () => {
+    await openSheet();
+    vi.mocked(setSetting).mockRejectedValueOnce(new Error('Storage is full'));
+
+    await act(async () => {
+      sheetButton('Tell me about updates')?.click();
+    });
+    await waitFor(() => container.querySelector('[role="alert"]') !== null, 'update opt-in error');
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('Couldn’t turn on update checks');
+    expect(alert?.textContent).not.toContain('Storage is full');
+    expect(sheet()).not.toBeNull();
+    expect(closed).toBe(0);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(await getSetting('app.updateCheck', false)).toBe(false);
+
+    const retry = sheetButton('Tell me about updates')!;
+    expect(retry.disabled).toBe(false);
+    await act(async () => {
+      retry.click();
+      retry.click();
+    });
+    await waitFor(() => container.querySelector('[role="status"]') !== null, 'confirmation after retry');
+    expect(setSetting).toHaveBeenCalledTimes(2);
+    expect(await getSetting('app.updateCheck', false)).toBe(true);
   });
 
   it('does not offer the update check again once it is already on', async () => {

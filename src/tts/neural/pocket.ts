@@ -15,6 +15,7 @@ import { POCKET_SIZE_MB, isModelDownloaded, setModelReady } from './models';
 import { NEURAL_STAGES, neuralError } from './neuralError';
 import { ORT_BASE_URL } from './ort';
 import { FloatPlayer } from './playback';
+import { POCKET_VOICES } from './pocketVoices';
 import { createProgressAggregator } from './progress';
 import { wasmThreadCount } from './threadBudget';
 import { changeSpeed, concatFloat32, encodeWav } from './wav';
@@ -31,6 +32,11 @@ const POCKET_CLAUSE = { maxWords: 18 };
 /** The only language bundle the app supports for now (Indian English readers). */
 const LANGUAGE = 'english_2026-04';
 const VOICE_SETTING = 'tts.pocket.voice';
+/** Runtime bundle data is untrusted for licensing: only these voices may be offered or loaded. */
+const POCKET_VOICE_IDS = new Set<string>(POCKET_VOICES.map((voice) => voice.id));
+// The static list is non-empty and licence-reviewed; a fixed default keeps cache identity
+// independent of the order (or contents) of a mutable runtime bundle.
+const DEFAULT_POCKET_VOICE = POCKET_VOICES[0]!.id;
 
 /**
  * Pocket has no speed input, so speed is resampling: pitch rises and falls with
@@ -115,20 +121,21 @@ class PocketEngine implements TtsEngine {
    * A Pocket clip is identified by the voice it was rendered in: the same sentence in
    * another voice is another clip, so a voice change must not replay the old one.
    *
-   * The library's voice list only exists once the model has loaded, so the name here is
-   * the saved (or requested) one rather than `voiceRef()`'s fallback: the panel only
-   * stores a name it was given, and an empty setting means the first built-in voice —
-   * one clip, whatever that voice is called. If a saved name ever dropped out of the
-   * library's list, its clips would be rendered again in the first voice under a new
-   * key: extra work, never a replay in the wrong voice.
+   * The library's voice list only exists once the model has loaded. An empty or
+   * non-commercial id resolves to the fixed safe default; an allowlisted id must
+   * exist in the runtime bundle or synthesis fails rather than caching a different
+   * voice under the requested id.
    */
   async cacheVariant(voiceId?: string): Promise<string> {
     const saved = voiceId ?? (await getSetting<string>(VOICE_SETTING, ''));
+    const safeSaved = POCKET_VOICE_IDS.has(saved) ? saved : DEFAULT_POCKET_VOICE;
     // `chunked` marks the clips rendered after `synthesize()` learned to voice a
     // long sentence clause by clause. Clips cached before that change have their
     // last words missing, and a stale key would keep replaying them. `2`: clips
     // rendered from 25-word clauses change voice where the library re-cut them.
-    return `${saved || 'default'}@chunked2`;
+    // `3`: voice selection now enforces the commercial-safe allowlist and records
+    // the voice actually used, so older or mislabeled clips are retired.
+    return `${safeSaved}@chunked3`;
   }
 
   private async load(): Promise<PocketTTS> {
@@ -161,7 +168,7 @@ class PocketEngine implements TtsEngine {
       tts.destroy();
       throw new Error('Pocket TTS download was cancelled');
     }
-    // `voices.bin` (52 MB) is fetched by the first `loadVoice()`. Doing it here
+    // `voices.bin` is fetched by the first `loadVoice()`. Doing it here
     // means "Ready" means speakable: the first Play would otherwise stall for a
     // minute on a phone, silently, because nothing reports that download.
     try {
@@ -171,7 +178,7 @@ class PocketEngine implements TtsEngine {
       throw neuralError('pocket', NEURAL_STAGES.voices, err);
     }
     if (epoch !== this.epoch) {
-      // `reset()`/a new load ran while voices.bin (52 MB) was downloading: the
+      // `reset()`/a new load ran while voices.bin was downloading: the
       // model must not be installed after the epoch that requested it ended.
       tts.destroy();
       throw new Error('Pocket TTS download was cancelled');
@@ -198,11 +205,8 @@ class PocketEngine implements TtsEngine {
   async listVoices(): Promise<TtsVoice[]> {
     const tts = this.tts;
     if (!tts?.ready) return [];
-    return tts.predefinedVoices.map((name) => ({
-      id: name,
-      name: name.charAt(0).toUpperCase() + name.slice(1),
-      lang: 'en',
-    }));
+    const available = new Set(tts.predefinedVoices);
+    return POCKET_VOICES.filter((voice) => available.has(voice.id));
   }
 
   async speak(
@@ -328,8 +332,16 @@ class PocketEngine implements TtsEngine {
 
   private async voiceRef(tts: PocketTTS, requested?: string): Promise<string> {
     const saved = requested ?? (await getSetting<string>(VOICE_SETTING, ''));
-    const name = tts.predefinedVoices.includes(saved) ? saved : tts.predefinedVoices[0];
-    if (!name) throw new Error('Pocket TTS reported no built-in voices');
+    const available = new Set(tts.predefinedVoices);
+    const allowed = POCKET_VOICE_IDS.has(saved);
+    const name = allowed ? saved : DEFAULT_POCKET_VOICE;
+    if (!available.has(name)) {
+      throw new Error(
+        allowed
+          ? `Pocket TTS voice "${name}" is unavailable in this bundle`
+          : `Pocket TTS default voice "${name}" is unavailable in this bundle`,
+      );
+    }
     let ref = this.voices.get(name);
     if (!ref) {
       ref = tts.loadVoice(name).catch((err: unknown) => {

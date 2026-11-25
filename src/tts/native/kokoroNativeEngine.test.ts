@@ -63,18 +63,30 @@ describe('cache identity', () => {
     await db.settings.clear();
   });
 
-  it('keys a clip by the speaker it will use, the fp32 weights and the chunked text', async () => {
-    expect(await kokoroNativeEngine.cacheVariant?.()).toBe('3@fp32@chunked');
+  it('keys a clip by the speaker, fp32 weights and lead-safe chunked text', async () => {
+    expect(await kokoroNativeEngine.cacheVariant?.()).toBe('3@fp32@chunked-lead-safe-v2');
     await setSetting(KOKORO_VOICE_SETTING, '11');
-    expect(await kokoroNativeEngine.cacheVariant?.()).toBe('11@fp32@chunked');
+    expect(await kokoroNativeEngine.cacheVariant?.()).toBe('11@fp32@chunked-lead-safe-v2');
     // The settings panel measures with an explicit speaker: that request decides.
-    expect(await kokoroNativeEngine.cacheVariant?.('7')).toBe('7@fp32@chunked');
+    expect(await kokoroNativeEngine.cacheVariant?.('7')).toBe('7@fp32@chunked-lead-safe-v2');
+  });
+
+  it('retires Android clips cached before the leading edge was preserved', async () => {
+    const text = 'The heart pumps blood.';
+    const legacyKey = cacheKey(text, 'kokoro', '@3@fp32@chunked', 1);
+    const currentKey = cacheKey(
+      text,
+      'kokoro',
+      await cacheVoiceId(kokoroNativeEngine, undefined),
+      1,
+    );
+    expect(currentKey).not.toBe(legacyKey);
   });
 
   it('migrates the int8 setting v0.3.3 wrote and keeps the build in the key', async () => {
     await setSetting(KOKORO_MODEL_SETTING, 'int8');
     // int8 clips are different weights: the key must not replay them as fp32 audio.
-    expect(await kokoroNativeEngine.cacheVariant?.()).toBe('3@fp32@chunked');
+    expect(await kokoroNativeEngine.cacheVariant?.()).toBe('3@fp32@chunked-lead-safe-v2');
   });
 
   it('gives the same sentence a different key after a speaker change', async () => {
@@ -94,7 +106,7 @@ describe('cache identity', () => {
   it('falls back like synthesize for a speaker id it cannot read', async () => {
     await setSetting(KOKORO_VOICE_SETTING, '11');
     // "en-US-language" is a phone voice, not a Kokoro speaker: synthesize uses af_heart.
-    expect(await kokoroNativeEngine.cacheVariant?.('en-US-language')).toBe('3@fp32@chunked');
+    expect(await kokoroNativeEngine.cacheVariant?.('en-US-language')).toBe('3@fp32@chunked-lead-safe-v2');
   });
 });
 

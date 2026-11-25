@@ -298,7 +298,7 @@ export default function ModelStatusBanner({ context }: ModelStatusBannerProps) {
   // The sheet stays mounted while it downloads: the banner above it can change or
   // disappear, but the progress and the "ready" message must not be unmounted.
   const offer = (
-    <VoicePrompt open={voiceOpen} onClose={() => setVoiceOpen(false)} source="banner" />
+    <VoicePrompt open={voiceOpen} onClose={() => setVoiceOpen(false)} />
   );
 
   if (runningId && runningDownload) {

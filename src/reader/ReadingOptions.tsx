@@ -37,7 +37,7 @@ type SwitchKey = Exclude<keyof SkipOptions, 'brackets'>;
 
 /** The order the chips appear in: prose structure first, then notation. */
 const SKIP_ROWS: { key: SwitchKey; label: string; hint?: string }[] = [
-  { key: 'tables', label: 'Tables', hint: 'Dose tables stay on the page, unread.' },
+  { key: 'tables', label: 'Tables', hint: 'Tables stay on the page, unread.' },
   { key: 'figures', label: 'Figures & charts', hint: 'Their captions are a separate switch.' },
   { key: 'captions', label: 'Captions' },
   { key: 'formulas', label: 'Formulas', hint: 'Equations and structures.' },

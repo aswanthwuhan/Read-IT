@@ -2,9 +2,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { BrowserRouter, Link, MemoryRouter } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import Dexie from 'dexie';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../core/db';
-import { getSetting } from '../core/settings';
+import { getSetting, setSetting } from '../core/settings';
 import { APP_VERSION } from '../core/version';
 import SettingsPage, { scrollToHash } from './SettingsPage';
 
@@ -12,6 +13,11 @@ declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock('../core/settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../core/settings')>();
+  return { ...actual, setSetting: vi.fn(actual.setSetting) };
+});
 
 const REPO_URL = 'https://github.com/aswanthwuhan/Read-IT';
 
@@ -36,7 +42,7 @@ const SECTION_TITLES = [
   'Reading aloud',
   'On-device voice models',
   'PDF layout',
-  'Pronunciation',
+  'Pronunciations',
   'Cached audio',
   'Storage',
   'Backup',
@@ -107,6 +113,10 @@ async function press(host: HTMLElement, id: string): Promise<void> {
   });
 }
 
+beforeEach(() => {
+  vi.mocked(setSetting).mockClear();
+});
+
 afterEach(async () => {
   if (live) {
     const { root } = live;
@@ -115,6 +125,7 @@ afterEach(async () => {
   }
   document.body.innerHTML = '';
   window.history.replaceState(null, '', window.location.pathname);
+  vi.restoreAllMocks();
   await db.delete();
   await db.open();
 });
@@ -345,9 +356,10 @@ describe('SettingsPage about: release notes and the opt-in update check', () => 
     );
   });
 
-  it('keeps the privacy promise and names the one exception in the About copy', () => {
+  it('keeps the privacy promise and names the network exceptions in About', () => {
     const copy = page.querySelector('#about .about-copy')?.textContent ?? '';
     expect(copy).toContain('Read IT is an offline ebook reader');
+    expect(copy).toContain('System voices are provided by your device and may use a network connection');
     expect(copy).toContain('optional update check');
   });
 
@@ -381,5 +393,79 @@ describe('SettingsPage about: release notes and the opt-in update check', () => 
 
     expect(await getSetting('app.updateCheck', false)).toBe(true);
     expect(host.querySelector<HTMLInputElement>('#update-check')?.checked).toBe(true);
+  });
+
+  it('does not show the update opt-in as checked until the setting is stored', async () => {
+    const { host } = await mountPage();
+    await press(host, 'about');
+
+    let finish!: () => void;
+    const saved = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const write = db.settings.put.bind(db.settings);
+    const put = vi.spyOn(db.settings, 'put').mockImplementationOnce((item, key) =>
+      Dexie.Promise.resolve(saved).then(() => write(item, key)),
+    );
+    const input = host.querySelector<HTMLInputElement>('#update-check')!;
+
+    await act(async () => {
+      input.click();
+      input.click();
+    });
+    expect(put).toHaveBeenCalledWith({ key: 'app.updateCheck', value: true });
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(input.checked).toBe(false);
+    expect(input.disabled).toBe(true);
+
+    await act(async () => finish());
+    await settle();
+    expect(input.checked).toBe(true);
+    expect(await getSetting('app.updateCheck', false)).toBe(true);
+  });
+
+  it('leaves the update opt-in off and explains a failed save', async () => {
+    const { host } = await mountPage();
+    await press(host, 'about');
+    let reject!: (reason: unknown) => void;
+    const saved = new Promise<void>((_, fail) => {
+      reject = fail;
+    });
+    vi.mocked(setSetting).mockImplementationOnce(() => saved);
+
+    const input = host.querySelector<HTMLInputElement>('#update-check')!;
+    await act(async () => {
+      input.click();
+      input.click();
+    });
+    expect(setSetting).toHaveBeenCalledTimes(1);
+    expect(input.checked).toBe(false);
+    expect(input.disabled).toBe(true);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+
+    await act(async () => reject(new Error('Storage is full')));
+    await settle();
+
+    const alert = host.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('Couldn’t save this choice');
+    expect(alert?.textContent).not.toContain('Storage is full');
+    expect(input.checked).toBe(false);
+    expect(input.disabled).toBe(false);
+    expect(input.getAttribute('aria-describedby')).toContain(alert!.id);
+    expect(await getSetting('app.updateCheck', false)).toBe(false);
+    expect(host.querySelector('.about-copy')?.textContent).toContain('offline ebook reader');
+    expect([...host.querySelectorAll('#about .about-links button')].some(
+      (button) => button.textContent === `What’s new in v${APP_VERSION}`,
+    )).toBe(true);
+
+    await act(async () => {
+      input.click();
+      input.click();
+    });
+    await settle();
+    expect(setSetting).toHaveBeenCalledTimes(2);
+    expect(input.checked).toBe(true);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(await getSetting('app.updateCheck', false)).toBe(true);
   });
 });

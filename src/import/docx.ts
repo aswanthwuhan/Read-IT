@@ -2,11 +2,47 @@ import mammoth from 'mammoth';
 import type { ParsedDoc } from '../core/types';
 import { parseHtmlDocument } from './html';
 import { DOCX_IMPORT_MAX_BYTES, EPUB_TEXT_MAX_BYTES } from './limits';
-import { assertEntries, MAX_ZIP_ENTRIES, verifyZipOutput, type ZipEntryInfo } from './zipLimits';
+import { assertEntries, MAX_ZIP_ENTRIES, type ZipEntryInfo } from './zipLimits';
+import { validateZipInWorker } from './zipValidate';
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_HEADER_SIGNATURE = 0x02014b50;
 const CENTRAL_HEADER_SIZE = 46;
+
+// Read IT's HTML walker does not render images. Mammoth's default converter still
+// reads and base64-encodes every embedded image, so substitute a tiny transparent
+// pixel without touching the image bytes. Meaningful alt text becomes a figure
+// block for the walker; empty-alt images stay inline and add no reading noise.
+const IGNORED_IMAGE_DATA_URI =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+
+interface MammothElementNode {
+  type: 'element';
+  tag: { tagName: string; attributes: Record<string, string>; fresh: boolean };
+  children: MammothElementNode[];
+}
+
+type MammothImage = Parameters<Parameters<typeof mammoth.images.imgElement>[0]>[0] & {
+  altText?: string;
+};
+type RuntimeImageConverter = (image: MammothImage, messages: unknown[]) => Promise<MammothElementNode[]>;
+type MammothImageConverter = NonNullable<Parameters<typeof mammoth.convertToHtml>[1]>['convertImage'];
+
+const placeholderImageConverter = mammoth.images.imgElement(async () => ({
+  src: IGNORED_IMAGE_DATA_URI,
+})) as unknown as RuntimeImageConverter;
+
+const textOnlyImageConverter = (async (image: MammothImage, messages: unknown[]) => {
+  // imgElement lets Mammoth's writer escape the alt attribute safely.
+  const imageNodes = await placeholderImageConverter(image, messages);
+  if (!image.altText?.trim()) return imageNodes;
+
+  return [{
+    type: 'element',
+    tag: { tagName: 'figure', attributes: {}, fresh: true },
+    children: imageNodes,
+  }];
+}) as unknown as MammothImageConverter;
 
 /**
  * Find the end-of-central-directory record. JSZip scans the whole buffer, not
@@ -82,19 +118,24 @@ export function assertSafeUncompressedSize(data: ArrayBuffer): void {
 }
 
 /** DOCX → mammoth HTML → the shared HTML walker (headings start chapters). */
-export async function parseDocx(data: ArrayBuffer, fallbackTitle: string): Promise<ParsedDoc> {
+export async function parseDocx(
+  data: ArrayBuffer,
+  fallbackTitle: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ParsedDoc> {
   if (data.byteLength > DOCX_IMPORT_MAX_BYTES) {
     throw new Error('This document is too large to import.');
   }
-  assertSafeUncompressedSize(data);
-  verifyZipOutput(data);
+  const validated = await validateZipInWorker(data, options.signal);
   // The browser build of mammoth reads `arrayBuffer`; its Node build reads `buffer`
   // and throws "Could not find file in options" otherwise (tests run in Node).
   const input =
     typeof Buffer === 'undefined'
-      ? { arrayBuffer: data }
-      : { arrayBuffer: data, buffer: Buffer.from(data) };
-  const result = await mammoth.convertToHtml(input as Parameters<typeof mammoth.convertToHtml>[0]);
+      ? { arrayBuffer: validated }
+      : { arrayBuffer: validated, buffer: Buffer.from(validated) };
+  const result = await mammoth.convertToHtml(input as Parameters<typeof mammoth.convertToHtml>[0], {
+    convertImage: textOnlyImageConverter,
+  });
   const doc = new DOMParser().parseFromString(result.value, 'text/html');
   return parseHtmlDocument(doc, { format: 'docx', title: fallbackTitle });
 }

@@ -1,6 +1,6 @@
 import { Blob as NodeBlob } from 'node:buffer';
 import { afterEach, describe, expect, it } from 'vitest';
-import { db } from '../core/db';
+import { db, summaryProgress } from '../core/db';
 import type { Block, ParsedDoc } from '../core/types';
 import { pageBlocks, pageOrderChanged, reorderPage, saveReorderedPage } from './blockOrder';
 
@@ -211,7 +211,7 @@ describe('saveReorderedPage', () => {
     await db.open();
   });
 
-  async function addBook(parsed: ParsedDoc): Promise<void> {
+  async function addBook(parsed: ParsedDoc, lastPos?: { chapterId: string; sentenceId: string }): Promise<void> {
     await db.books.add({
       id: 'book',
       title: 'Paper',
@@ -220,6 +220,7 @@ describe('saveReorderedPage', () => {
       // jsdom's Blob does not survive fake-indexeddb's structured clone; Node's does.
       fileBlob: new NodeBlob(['%PDF-1.4 bytes']) as unknown as Blob,
       parsed,
+      ...(lastPos ? { lastPos } : {}),
     });
   }
 
@@ -239,6 +240,23 @@ describe('saveReorderedPage', () => {
 
     const record = await db.books.get('book');
     expect(record && layout(record.parsed)).toEqual([['b', 'a']]);
+  });
+
+  it('rebuilds the shelf summary so reordered blocks change progress', async () => {
+    const first = block('b-0', 'p', [[[1, 10, 10, 90, 10]]]);
+    const second = block('b-1', 'p', [[[1, 10, 30, 90, 10]]]);
+    first.sentences[0]!.id = '0-0-0';
+    second.sentences[0]!.id = '0-1-0';
+    await addBook(paper({ title: 'One', blocks: [first, second] }), {
+      chapterId: 'ch-0',
+      sentenceId: '0-1-0',
+    });
+
+    await saveReorderedPage('book', 1, ['b-1', 'b-0']);
+
+    const summary = await db.bookSummaries.get('book');
+    expect(summary?.chapters[0]?.blocks.map((row) => row.id)).toEqual(['b-1', 'b-0']);
+    expect(summary && summaryProgress(summary, summary.lastPos)).toBe(50);
   });
 
   it('returns null for a book that is not there', async () => {

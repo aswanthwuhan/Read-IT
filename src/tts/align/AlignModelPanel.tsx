@@ -297,7 +297,7 @@ export default function AlignModelPanel() {
 
           <p className={styles.intro}>
             Words are highlighted as they are spoken. Without this model the timing is an estimate from
-            each word&apos;s length, which drifts on long drug names and pauses.
+            each word&apos;s length, which drifts on long words and pauses.
           </p>
         </div>
       </details>

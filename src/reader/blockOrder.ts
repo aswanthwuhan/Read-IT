@@ -9,8 +9,8 @@
  *
  * Everything here is pure except `saveReorderedPage`, which writes one row.
  */
-import { db } from '../core/db';
-import type { Block, ParsedDoc } from '../core/types';
+import { db, putBookSummary } from '../core/db';
+import type { Block, BookRecord, ParsedDoc } from '../core/types';
 
 /** A page-space rectangle: PDF user-space units at scale 1, like `PdfRect`. */
 export interface PageBox {
@@ -156,9 +156,21 @@ export async function saveReorderedPage(
   page: number,
   blockIdsInNewOrder: string[]
 ): Promise<ParsedDoc | null> {
-  const book = await db.books.get(bookId);
-  if (!book) return null;
-  const parsed = reorderPage(book.parsed, page, blockIdsInNewOrder);
-  await db.books.update(bookId, { parsed });
-  return parsed;
+  let refreshed: BookRecord | undefined;
+  await db.transaction('rw', [db.books, db.bookSummaries], async () => {
+    const current = await db.books.get(bookId);
+    if (!current) return;
+    const parsed = reorderPage(current.parsed, page, blockIdsInNewOrder);
+    await db.books.update(bookId, { parsed });
+    // Block order changes progress even when sentence ids and counts do not.
+    await db.bookSummaries.delete(bookId);
+    refreshed = { ...current, parsed };
+  });
+  if (!refreshed) return null;
+  try {
+    await putBookSummary(refreshed);
+  } catch {
+    // The summary is derived; the library's bounded fallback can rebuild it.
+  }
+  return refreshed.parsed;
 }

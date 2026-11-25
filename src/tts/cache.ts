@@ -155,13 +155,11 @@ export function clearAudio(engineId?: string): Promise<void> {
       audioBytes = 0;
       return;
     }
-    // `engine` is not indexed (schema is owned by core), so filter the table.
-    const rows = await db.audioCache.filter((r) => r.engine === engineId).toArray();
-    await db.audioCache.bulkDelete(rows.map((r) => r.key));
-    if (audioBytes !== null) {
-      for (const row of rows) audioBytes -= row.audio.size ?? 0;
-      audioBytes = Math.max(0, audioBytes);
-    }
+    // The engine index deletes only matching rows. If a byte total was memoised,
+    // invalidate it rather than deserializing Blobs just to subtract their sizes;
+    // the next size query scans only the rows that remain.
+    const deleted = await db.audioCache.where('engine').equals(engineId).delete();
+    if (deleted > 0) audioBytes = null;
   });
 }
 

@@ -1,5 +1,6 @@
-import { db, newId } from '../core/db';
-import type { BookRecord, Bookmark, Highlight, ParsedDoc } from '../core/types';
+import { db, isBookSummary, newId, summaryChapterTitle } from '../core/db';
+import { getParsedContent } from '../core/contentStore';
+import type { Bookmark, BookSummary, Highlight, ParsedDoc } from '../core/types';
 
 export type NewHighlight = Omit<Highlight, 'id' | 'createdAt'> & Partial<Pick<Highlight, 'id' | 'createdAt'>>;
 export type NewBookmark = Omit<Bookmark, 'id' | 'createdAt'> & Partial<Pick<Bookmark, 'id' | 'createdAt'>>;
@@ -85,30 +86,91 @@ function oneLine(text: string): string {
   return text.replace(/\s*\n\s*/g, ' ').trim();
 }
 
+interface NotesBook {
+  title: string;
+  author?: string;
+  chapterOrder: string[];
+  parsed?: ParsedDoc;
+}
+
 /** Notes as Markdown, grouped by book then chapter, with the highlight's note. */
 export async function exportNotesMarkdown(bookId?: string): Promise<string> {
-  // Reading one book's record is enough for a per-book export; loading every
-  // record would pull every stored file blob into memory for nothing.
-  const [books, highlights] = await Promise.all([
-    bookId ? db.books.where('id').equals(bookId).toArray() : db.books.toArray(),
-    bookId ? db.highlights.where('bookId').equals(bookId).toArray() : db.highlights.toArray(),
-  ]);
+  const highlights = bookId
+    ? await db.highlights.where('bookId').equals(bookId).toArray()
+    : await db.highlights.toArray();
 
-  const bookById = new Map<string, BookRecord>(books.map((b) => [b.id, b]));
+  const lines = ['# Notes', '', `_Exported ${markdownDate(Date.now())}_`, ''];
+  if (highlights.length === 0) {
+    lines.push('_No highlights yet._', '');
+    return `${lines.join('\n').trimEnd()}\n`;
+  }
+
+  // Only books that actually have notes are needed. Their shelf summaries carry
+  // titles, authors, chapter order and enough sentence shape to locate normal
+  // imported highlights without opening a book row or its original blob.
+  const highlightedIds = [...new Set(highlights.map((highlight) => highlight.bookId))];
+  const summaries = await db.bookSummaries.bulkGet(highlightedIds);
+  const summaryById = new Map<string, BookSummary>();
+  const bookById = new Map<string, NotesBook>();
+  summaries.forEach((summary, at) => {
+    const id = highlightedIds[at];
+    if (!summary || summary.id !== id || !isBookSummary(summary)) return;
+    summaryById.set(id, summary);
+    bookById.set(id, {
+      title: summary.title,
+      author: summary.author,
+      chapterOrder: summary.chapters.map((chapter) => chapter.title),
+    });
+  });
+
+  const loaded = new Map<string, NotesBook>();
+  async function loadNotesBook(id: string): Promise<NotesBook> {
+    const ready = loaded.get(id);
+    if (ready) return ready;
+    const summary = bookById.get(id);
+    let parsed = (await getParsedContent(id)) ?? undefined;
+    let title = summary?.title;
+    let author = summary?.author;
+    let chapterOrder = summary?.chapterOrder;
+
+    // Content-store misses are possible on older imports. Read one highlighted
+    // legacy book at a time, never the whole library and never an unrelated blob.
+    if (!parsed) {
+      const book = await db.books.get(id);
+      if (book) {
+        parsed = book.parsed;
+        title = book.title;
+        author = book.author;
+        chapterOrder = book.parsed.chapters.map((chapter) => chapter.title);
+      }
+    } else {
+      title ??= parsed.title;
+      author ??= parsed.author;
+      chapterOrder ??= parsed.chapters.map((chapter) => chapter.title);
+    }
+
+    const info: NotesBook = { title: title ?? id, author, chapterOrder: chapterOrder ?? [], parsed };
+    loaded.set(id, info);
+    bookById.set(id, info);
+    return info;
+  }
+
   const grouped = new Map<string, Map<string, Highlight[]>>();
   for (const highlight of highlights) {
-    const book = bookById.get(highlight.bookId);
-    const chapter = findChapterTitle(book?.parsed, highlight.sentenceIds) ?? 'Unlinked';
+    const summary = summaryById.get(highlight.bookId);
+    let chapter = summary?.chapters.length
+      ? highlight.sentenceIds.map((id) => summaryChapterTitle(summary, id)).find((title) => title !== undefined)
+      : undefined;
+    if (chapter === undefined) {
+      const book = await loadNotesBook(highlight.bookId);
+      chapter = findChapterTitle(book.parsed, highlight.sentenceIds);
+    }
+    chapter ??= 'Unlinked';
     const byChapter = grouped.get(highlight.bookId) ?? new Map<string, Highlight[]>();
     const list = byChapter.get(chapter) ?? [];
     list.push(highlight);
     byChapter.set(chapter, list);
     grouped.set(highlight.bookId, byChapter);
-  }
-
-  const lines = ['# Notes', '', `_Exported ${markdownDate(Date.now())}_`, ''];
-  if (grouped.size === 0) {
-    lines.push('_No highlights yet._', '');
   }
 
   const orderedBooks = [...grouped.keys()].sort((a, b) => {
@@ -123,7 +185,7 @@ export async function exportNotesMarkdown(bookId?: string): Promise<string> {
     if (!byChapter) continue;
     lines.push(`## ${book?.title ?? id}${book?.author ? ` — ${book.author}` : ''}`, '');
 
-    const chapterOrder = book?.parsed.chapters.map((c) => c.title) ?? [];
+    const chapterOrder = book?.chapterOrder ?? [];
     const chapterNames = [...byChapter.keys()].sort((a, b) => {
       const ai = chapterOrder.indexOf(a);
       const bi = chapterOrder.indexOf(b);

@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { useFocusGuard } from '../core/focusGuard';
 import type { Highlight } from '../core/types';
 import { deleteBookmark, deleteHighlight, listBookmarks, listHighlights, updateHighlight } from './annotations';
 import './highlights.css';
@@ -23,6 +24,17 @@ export default function HighlightList({ bookId, onJump }: { bookId: string; onJu
   const [editingNote, setEditingNote] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [status, setStatus] = useState('');
+  const noteEditorRef = useRef<HTMLDivElement>(null);
+  const noteTextRef = useRef<HTMLTextAreaElement>(null);
+  const noteReturnRef = useRef<HTMLButtonElement>(null);
+  useFocusGuard({
+    active: editingNote !== null,
+    mode: 'popover',
+    containerRef: noteEditorRef,
+    initialFocusRef: noteTextRef,
+    returnFocusRef: noteReturnRef,
+    onEscape: () => setEditingNote(null),
+  });
 
   async function saveNote(id: string) {
     try {
@@ -92,10 +104,11 @@ export default function HighlightList({ bookId, onJump }: { bookId: string; onJu
                 </div>
 
                 {editingNote === highlight.id ? (
-                  <div className="hl-note-editor">
+                  <div ref={noteEditorRef} className="hl-note-editor" tabIndex={-1}>
                     <label className="field" htmlFor={`note-${highlight.id}`}>
                       <span className="field-label">Note</span>
                       <textarea
+                        ref={noteTextRef}
                         id={`note-${highlight.id}`}
                         rows={3}
                         value={noteDraft}
@@ -120,9 +133,15 @@ export default function HighlightList({ bookId, onJump }: { bookId: string; onJu
                       </p>
                     ) : null}
                     <button
+                      ref={(node) => {
+                        // The editor replaces this button. Keep the replacement
+                        // available for focus restoration when the editor closes.
+                        if (node) noteReturnRef.current = node;
+                      }}
                       type="button"
                       className="btn btn-ghost hl-note-btn"
-                      onClick={() => {
+                      onClick={(event) => {
+                        noteReturnRef.current = event.currentTarget;
                         setEditingNote(highlight.id);
                         setNoteDraft(highlight.note ?? '');
                       }}

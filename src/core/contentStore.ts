@@ -13,7 +13,7 @@
  * there rather than throwing.
  */
 import { db } from './db';
-import type { BookRecord } from './types';
+import type { BookRecord, ParsedDoc } from './types';
 
 export interface StoredContent {
   id: string;
@@ -101,6 +101,18 @@ export async function getContent(id: string): Promise<string | null> {
   }
 }
 
+/** A decoded, usable parsed document, or null for a missing/damaged content row. */
+export async function getParsedContent(id: string): Promise<ParsedDoc | null> {
+  const json = await getContent(id);
+  if (json === null) return null;
+  try {
+    const parsed = JSON.parse(json) as ParsedDoc;
+    return parsed && typeof parsed === 'object' && Array.isArray(parsed.chapters) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A book with its parsed document resolved from the content store when a row
  * exists. The book's own `parsed` stays the fallback until every reader reads
@@ -108,15 +120,8 @@ export async function getContent(id: string): Promise<string | null> {
  * a damaged backup cannot hand the reader an object with no chapters.
  */
 export async function hydrateBook(book: BookRecord): Promise<BookRecord> {
-  const json = await getContent(book.id);
-  if (json === null) return book;
-  try {
-    const parsed = JSON.parse(json) as BookRecord['parsed'];
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.chapters)) return book;
-    return { ...book, parsed };
-  } catch {
-    return book;
-  }
+  const parsed = await getParsedContent(book.id);
+  return parsed ? { ...book, parsed } : book;
 }
 
 export async function deleteContent(id: string): Promise<void> {

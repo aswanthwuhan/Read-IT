@@ -1,4 +1,4 @@
-import { db, newId } from '../core/db';
+import { db, newId, putBookSummary } from '../core/db';
 import { deleteContent, putContent } from '../core/contentStore';
 import { isIos } from '../core/platform';
 import type { BookRecord, ColumnMode, DocFormat, ParsedDoc } from '../core/types';
@@ -9,7 +9,14 @@ import { parseHtmlDocument } from './html';
 import type { LayoutMode } from './pdf';
 import { parseMarkdown } from './md';
 import { parseText } from './txt';
-import { ARTICLE_HTML_MAX_BYTES } from './limits';
+import {
+  ARTICLE_HTML_MAX_BYTES,
+  assertImportSize,
+  PASTE_MAX_CHARS,
+  TITLE_MAX_CHARS,
+} from './limits';
+
+export { IOS_IMPORT_LIMIT_BYTES } from './limits';
 
 export interface ImportResult {
   bookId: string;
@@ -25,6 +32,13 @@ export interface ImportOptions {
    * this; left out, the device-wide setting decides.
    */
   pdfLayout?: LayoutMode;
+  /** Cancels between bounded stages and during cancellable parser work. */
+  signal?: AbortSignal;
+}
+
+/** Stop before another read or write once the caller has cancelled the import. */
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('The import was cancelled.', 'AbortError');
 }
 
 const FORMAT_BY_EXT: Record<string, DocFormat> = {
@@ -78,13 +92,24 @@ async function parseFile(
   if (!format) {
     throw new Error(`Unsupported file type: ${name}. Import a PDF, EPUB, DOCX, TXT, Markdown or HTML file.`);
   }
+  throwIfAborted(options.signal);
+  assertImportSize(file, format);
 
   const fallback = titleFromFileName(name);
   // Read the bytes where a parser needs them and nowhere else: the whole file
   // never sits in memory next to a second copy of itself. TextDecoder is kept
   // for text rather than `Blob.text()` because it drops a UTF-8 BOM reliably.
-  const bytes = async () => readBytes ?? file.arrayBuffer();
-  const text = async () => decodeText(await bytes());
+  const bytes = async () => {
+    throwIfAborted(options.signal);
+    const value = readBytes ?? await file.arrayBuffer();
+    throwIfAborted(options.signal);
+    return value;
+  };
+  const text = async () => {
+    const value = decodeText(await bytes());
+    throwIfAborted(options.signal);
+    return value;
+  };
 
   switch (format) {
     case 'txt':
@@ -111,7 +136,7 @@ async function parseFile(
         // prove the app is alive without re-rendering the library 1000 times.
         if (done !== total && done % 25 !== 0) return;
         onProgress?.(phase === 'layout' ? `Analysing layout: page ${done} of ${total}` : `page ${done} of ${total}`);
-      }, { layout: options.pdfLayout });
+      }, { layout: options.pdfLayout, signal: options.signal });
       // Under ~50 characters per page there is no real text layer: a scan.
       if (!parsed.doc.chapters.length && parsed.charsPerPage < 50) {
         throw new Error('No readable text found in this PDF. Image-only scans require OCR before import.');
@@ -123,18 +148,24 @@ async function parseFile(
 
     case 'epub': {
       const { parseEpub } = await import('./epub');
-      const parsed = await parseEpub(await bytes(), fallback);
+      const parsed = await parseEpub(await bytes(), fallback, options.signal);
       return { doc: parsed, warning: parsed.warning };
     }
 
     case 'docx': {
       const { parseDocx } = await import('./docx');
-      return { doc: await parseDocx(await bytes(), fallback) };
+      return { doc: await parseDocx(await bytes(), fallback, { signal: options.signal }) };
     }
   }
 }
 
-async function saveRecord(doc: ParsedDoc, fileBlob: Blob, layout?: BookRecord['layout']): Promise<string> {
+async function saveRecord(
+  doc: ParsedDoc,
+  fileBlob: Blob,
+  layout?: BookRecord['layout'],
+  signal?: AbortSignal,
+): Promise<string> {
+  throwIfAborted(signal);
   if (!doc.chapters.length) throw new Error('No readable text found in this file.');
 
   const record: BookRecord = {
@@ -149,8 +180,15 @@ async function saveRecord(doc: ParsedDoc, fileBlob: Blob, layout?: BookRecord['l
   if (layout) record.layout = layout;
 
   await db.books.add(record);
+  // The shelf index is derived and optional. A failed write leaves a missing
+  // summary, which the library repairs from this row; it never loses the import.
+  try {
+    await putBookSummary(record);
+  } catch {
+    // Never report (or log) the error: it can carry the imported text.
+  }
   // The book keeps its own parsed document for now; this compressed row is the
-  // copy a later library screen will read without cloning every book. A failed
+  // copy the reader can hydrate without cloning every row in the library. A failed
   // copy must not undo an import that has already saved the book: a missing row
   // falls back to `parsed`, which stays authoritative.
   try {
@@ -164,13 +202,12 @@ async function saveRecord(doc: ParsedDoc, fileBlob: Blob, layout?: BookRecord['l
 /** Remove a book and everything that hangs off it, in one transaction. */
 export async function deleteBook(bookId: string): Promise<void> {
   let deletedClips = 0;
-  await db.transaction('rw', [db.books, db.highlights, db.bookmarks, db.audioCache, db.bookContent], async () => {
+  await db.transaction('rw', [db.books, db.highlights, db.bookmarks, db.audioCache, db.bookContent, db.bookSummaries], async () => {
     await db.highlights.where('bookId').equals(bookId).delete();
     await db.bookmarks.where('bookId').equals(bookId).delete();
-    const clips = await db.audioCache.filter((r) => r.bookId === bookId).toArray();
-    deletedClips = clips.length;
-    if (clips.length > 0) await db.audioCache.bulkDelete(clips.map((clip) => clip.key));
+    deletedClips = await db.audioCache.where('bookId').equals(bookId).delete();
     await deleteContent(bookId);
+    await db.bookSummaries.delete(bookId);
     await db.books.delete(bookId);
   });
   // The cache module memoises its byte total; a delete outside it would leave
@@ -201,9 +238,14 @@ export async function ownedCopy(file: Blob & { name?: string }): Promise<Blob> {
  * Blob so the import path can hand the very same bytes to the parser instead of
  * reading the file a second time; on iOS nothing is read or copied at all.
  */
-async function ownedCopyWithBytes(file: Blob & { name?: string }): Promise<{ blob: Blob; bytes?: ArrayBuffer }> {
+async function ownedCopyWithBytes(
+  file: Blob & { name?: string },
+  signal?: AbortSignal,
+): Promise<{ blob: Blob; bytes?: ArrayBuffer }> {
+  throwIfAborted(signal);
   if (isIos()) return { blob: file };
   const bytes = await file.arrayBuffer();
+  throwIfAborted(signal);
   return { blob: new Blob([bytes], { type: file.type || 'application/octet-stream' }), bytes };
 }
 
@@ -222,54 +264,57 @@ export function fileMissing(book: Pick<BookRecord, 'fileBlob'>): boolean {
   return !blob || typeof blob.size !== 'number' || blob.size === 0;
 }
 
-/**
- * The largest file this app will try to import on an iPhone or an iPad.
- *
- * iOS Safari kills the whole tab somewhere between 1 GB and 1.5 GB of memory,
- * and an import costs about twice the file's size on top of the app itself: the
- * bytes once for the parser (pdf.js hands them to its worker, the extracted
- * text grows beside them) and once more while IndexedDB writes the stored copy.
- * A 300 MB scan is already close to the edge, so 500 MB is the point where
- * refusing costs the reader less than a tab that vanishes mid-import. Android
- * and desktop builds have no such limit.
- */
-export const IOS_IMPORT_LIMIT_BYTES = 500 * 1024 * 1024;
-
 /** Full result including the scanned-PDF warning the library shows inline. */
 export async function importFileDetailed(
   file: File,
   onProgress?: (note: string) => void,
   options: ImportOptions = {},
 ): Promise<ImportResult> {
-  if (isIos() && file.size > IOS_IMPORT_LIMIT_BYTES) {
-    throw new Error(
-      `That file is too large to import on this device (over ${IOS_IMPORT_LIMIT_BYTES / 1024 ** 2} MB). ` +
-        'Import it on a computer instead.',
-    );
+  throwIfAborted(options.signal);
+  const format = detectFormat(file);
+  if (!format) {
+    throw new Error(`Unsupported file type: ${file.name}. Import a PDF, EPUB, DOCX, TXT, Markdown or HTML file.`);
   }
+  // Reject by the picker's byte count before ownedCopyWithBytes allocates or reads
+  // anything. This also keeps the iOS-wide memory backstop ahead of every format.
+  assertImportSize(file, format);
   // The stored copy of the book and the bytes for the parser come from the one
   // copy policy (ownedCopyWithBytes): on iOS that is the picked File untouched,
   // elsewhere the bytes read for the copy go straight to the parser.
-  const { blob: stored, bytes } = await ownedCopyWithBytes(file);
+  const { blob: stored, bytes } = await ownedCopyWithBytes(file, options.signal);
+  throwIfAborted(options.signal);
   const { doc, warning, layout } = await parseFile(stored, file.name, onProgress, bytes, options);
-  const bookId = await saveRecord(doc, stored, layout);
+  throwIfAborted(options.signal);
+  const bookId = await saveRecord(doc, stored, layout, options.signal);
   return { bookId, warning };
 }
 
 /** Import a user-picked file and return the new book id. */
-export async function importFile(file: File): Promise<string> {
-  return (await importFileDetailed(file)).bookId;
+export async function importFile(file: File, options: ImportOptions = {}): Promise<string> {
+  return (await importFileDetailed(file, undefined, options)).bookId;
 }
 
-export async function importText(title: string, text: string): Promise<string> {
-  // No title typed: the first line usually is one ("Chapter 1: The Voyage").
-  const firstLine = normaliseText(text.trim().split(/\r?\n/, 1)[0] ?? '').slice(0, 80);
+export async function importText(title: string, text: string, options: ImportOptions = {}): Promise<string> {
+  throwIfAborted(options.signal);
+  // Check the raw inputs before trim/normalise can hide an oversized paste, and
+  // count UTF-16 code units to match the controls' maxLength attributes.
+  if (text.length > PASTE_MAX_CHARS) {
+    throw new Error(`That pasted text is too long to import (over ${PASTE_MAX_CHARS.toLocaleString()} characters).`);
+  }
+  if (title.length > TITLE_MAX_CHARS) {
+    throw new Error(`That title is too long (over ${TITLE_MAX_CHARS} characters).`);
+  }
+
+  // Slice the raw first line before normalising: otherwise a long run of spaces
+  // can be collapsed into a title that was never in the first 80 characters.
+  const firstLine = normaliseText((text.split(/\r?\n/, 1)[0] ?? '').slice(0, 80));
   // A one-line paste is the text itself, not a heading.
-  const heading = text.trim().includes('\n') ? firstLine : '';
+  const trimmed = text.trim();
+  const heading = trimmed.includes('\n') ? firstLine : '';
   const cleanTitle = normaliseText(title) || heading || 'Pasted text';
   const doc = parseText(text, cleanTitle);
   if (!doc.chapters.length) throw new Error('Nothing to import: the pasted text is empty.');
-  return saveRecord(doc, new Blob([text], { type: 'text/plain' }));
+  return saveRecord(doc, new Blob([text], { type: 'text/plain' }), undefined, options.signal);
 }
 
 const tooLargePage = () =>
@@ -489,6 +534,8 @@ async function reparseBook(
   saveColumns: ColumnMode | undefined,
   onProgress?: (note: string) => void,
 ): Promise<ReanalyseResult> {
+  // Stored files get the same pre-read bound as fresh picks.
+  assertImportSize(book.fileBlob, book.format);
   onProgress?.('Opening the saved file');
   const { parsePdf } = await import('./pdf');
   const parsed = await parsePdf(
@@ -516,7 +563,8 @@ async function reparseBook(
     positionKept: true,
   };
 
-  await db.transaction('rw', [db.books, db.highlights, db.bookmarks, db.settings], async () => {
+  let refreshed = book;
+  await db.transaction('rw', [db.books, db.highlights, db.bookmarks, db.settings, db.bookSummaries], async () => {
     const current = await db.books.get(book.id);
     if (!current) throw new Error('This book was removed while its PDF was being read.');
     if (saveColumns === undefined && (current.columns ?? 'auto') !== columns) {
@@ -554,13 +602,29 @@ async function reparseBook(
       await db.settings.put({ key: readerPosKey(book.id), value: moved(saved as Position) });
     }
 
-    await db.books.update(book.id, {
+    refreshed = {
+      ...current,
       parsed: parsed.doc,
       lastPos: moved(current.lastPos),
       layout: parsed.layout,
       ...(saveColumns === undefined ? {} : { columns: saveColumns }),
+    };
+    await db.books.update(book.id, {
+      parsed: refreshed.parsed,
+      lastPos: refreshed.lastPos,
+      layout: refreshed.layout,
+      ...(saveColumns === undefined ? {} : { columns: saveColumns }),
     });
+    // Never leave the old sentence counts or progress beside a new document.
+    // If recreating the summary fails, the bounded library fallback repairs it.
+    await db.bookSummaries.delete(book.id);
   });
+
+  try {
+    await putBookSummary(refreshed);
+  } catch {
+    // Never log the error: it can carry the text of the re-read book.
+  }
 
   // Keep the compressed copy in step with the re-read book. This is outside the
   // transaction: deflate is async and would let Dexie's scope expire, while the

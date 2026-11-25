@@ -1,11 +1,10 @@
 apply plugin: 'com.android.application'
 
-// --- Release signing: prepared, but inactive until a keystore exists ---------------------------
-// The shipped APK is currently signed with whatever debug key the build machine had, which is
-// why an upgrade from another machine needs an uninstall (and wipes the WebView's notes).
-// Create android/keystore.properties (git-ignored) with storeFile, storePassword, keyAlias and
-// keyPassword and assembleRelease signs with it; with no such file the release build is left
-// unsigned exactly as before, so this changes nothing until the lead activates it.
+// --- Release signing: required for release artifacts ------------------------------------------
+// Debug builds remain available without a keystore. A release packaging task fails closed when
+// android/keystore.properties is absent, rather than producing an unsigned or debug-signed APK that
+// cannot safely replace an installed release. Create that git-ignored file with storeFile,
+// storePassword, keyAlias and keyPassword to sign release builds.
 def keystorePropertiesFile = rootProject.file('keystore.properties')
 def hasReleaseKeystore = keystorePropertiesFile.exists()
 def keystoreProperties = new Properties()
@@ -75,6 +74,17 @@ android {
                 signingConfig signingConfigs.release
             }
         }
+    }
+}
+
+// Do not let CI or a local release command silently produce an unsigned artifact. This check is
+// task-graph based so ordinary debug builds and JVM tests still work without release secrets.
+gradle.taskGraph.whenReady { taskGraph ->
+    def packagingRelease = taskGraph.allTasks.any { it.path == ':app:packageRelease' }
+    if (packagingRelease && !hasReleaseKeystore) {
+        throw new GradleException(
+                "Release packaging requires android/keystore.properties with storeFile, " +
+                "storePassword, keyAlias and keyPassword. Debug builds do not require it.")
     }
 }
 

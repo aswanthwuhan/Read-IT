@@ -2,6 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PdfRect } from '../core/types';
+import { PDFJS_DOCUMENT_OPTIONS, PDF_READER_CANVAS_MAX_DIMENSION, PDF_READER_CANVAS_MAX_PIXELS } from '../import/pdfAssets';
 import type { PageBlock } from './blockOrder';
 
 const pdf = vi.hoisted(() => {
@@ -11,11 +12,27 @@ const pdf = vi.hoisted(() => {
   const page = {
     pageNumber: 1,
     cleanup,
-    getViewport: vi.fn(({ scale }: { scale: number }) => ({ scale, width: 600 * scale, height: 792 * scale })),
-    render: vi.fn(() => ({ promise: Promise.resolve(), cancel })),
+    getViewport: vi.fn(({ scale }: { scale: number }) => ({
+      scale,
+      width: 600 * scale,
+      height: 792 * scale,
+      transform: [scale, 0, 0, -scale, 0, 792 * scale],
+    })),
+    render: vi.fn((_options: { canvas: HTMLCanvasElement; transform?: number[] }) => ({ promise: Promise.resolve(), cancel })),
+    getTextContent: vi.fn(async () => ({
+      items: [
+        { str: 'Absorp', hasEOL: false },
+        { str: 'tion is', hasEOL: false },
+        { str: ' ', hasEOL: false },
+        { str: 'the first step.', hasEOL: true },
+        { str: 'Second paragraph.', hasEOL: false },
+      ],
+      styles: {},
+      lang: 'en',
+    })),
   };
   const getDocument = vi.fn(() => ({
-    promise: Promise.resolve({ numPages: 5, getPage: async () => page }),
+    promise: Promise.resolve({ numPages: 5, getPage: async (pageNumber: number) => ({ ...page, pageNumber }) }),
     destroy,
   }));
   return { page, cancel, cleanup, destroy, getDocument };
@@ -26,7 +43,7 @@ const pdf = vi.hoisted(() => {
 vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({ GlobalWorkerOptions: {}, getDocument: pdf.getDocument }));
 vi.mock('../import/pdfWorker?worker&url', () => ({ default: 'worker.js' }));
 
-const { default: PdfView } = await import('./PdfView');
+const { default: PdfView, canvasBackingRatio, canvasBackingSize } = await import('./PdfView');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -57,12 +74,13 @@ async function renderView(
   file: Blob = new Blob(['%PDF-1.4']),
   fullscreen = false,
   docKey = 'book-1',
-  page = 1
+  page = 1,
+  wordRects?: PdfRect[],
 ): Promise<void> {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  await rerenderView(rects, file, fullscreen, docKey, page);
+  await rerenderView(rects, file, fullscreen, docKey, page, wordRects);
 }
 
 async function rerenderView(
@@ -70,7 +88,8 @@ async function rerenderView(
   file: Blob = new Blob(['%PDF-1.4']),
   fullscreen = false,
   docKey = 'book-1',
-  page = 1
+  page = 1,
+  wordRects?: PdfRect[],
 ): Promise<void> {
   await act(async () => {
     root?.render(
@@ -79,6 +98,7 @@ async function rerenderView(
         file={file}
         page={page}
         rects={rects}
+        wordRects={wordRects}
         onPageChange={() => undefined}
         fullscreen={fullscreen}
       />
@@ -92,8 +112,22 @@ function canvas(): HTMLCanvasElement {
   return element;
 }
 
+function pageDescription(): string {
+  const id = canvas().getAttribute('aria-describedby');
+  const element = id ? document.getElementById(id) : null;
+  return element?.textContent?.trim() ?? '';
+}
+
 beforeEach(() => {
   pdf.page.render.mockClear();
+  pdf.page.getViewport.mockReset();
+  pdf.page.getViewport.mockImplementation(({ scale }: { scale: number }) => ({
+    scale,
+    width: 600 * scale,
+    height: 792 * scale,
+    transform: [scale, 0, 0, -scale, 0, 792 * scale],
+  }));
+  pdf.page.getTextContent.mockClear();
   pdf.cancel.mockClear();
   pdf.cleanup.mockClear();
   pdf.destroy.mockClear();
@@ -117,12 +151,34 @@ afterEach(() => {
     act(() => root?.unmount());
     root = null;
   }
-  container.remove();
+  container?.remove();
   vi.restoreAllMocks();
   delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
   delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
   delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
   delete (window as { devicePixelRatio?: number }).devicePixelRatio;
+});
+
+describe('canvas backing caps', () => {
+  it('keeps ordinary pages at screen resolution', () => {
+    expect(canvasBackingRatio(600, 792, 2)).toBe(2);
+    expect(canvasBackingSize(600, 792, 2)).toEqual({ width: 1200, height: 1584, ratio: 2 });
+  });
+
+  it('reduces effective DPR as zoom grows and never exceeds either cap', () => {
+    const first = canvasBackingSize(10_000, 15_000, 2);
+    const zoomed = canvasBackingSize(20_000, 30_000, 2);
+    expect(zoomed.ratio).toBeLessThan(first.ratio);
+    for (const backing of [first, zoomed]) {
+      expect(backing.width).toBeLessThanOrEqual(PDF_READER_CANVAS_MAX_DIMENSION);
+      expect(backing.height).toBeLessThanOrEqual(PDF_READER_CANVAS_MAX_DIMENSION);
+      expect(backing.width * backing.height).toBeLessThanOrEqual(PDF_READER_CANVAS_MAX_PIXELS);
+    }
+    const dimensionCapped = canvasBackingSize(10_000, 1_000, 2);
+    expect(dimensionCapped.width).toBe(PDF_READER_CANVAS_MAX_DIMENSION);
+    expect(dimensionCapped.ratio).toBeLessThan(1);
+    expect(canvasBackingRatio(Number.NaN, 100, 2)).toBe(0);
+  });
 });
 
 describe('PdfView', () => {
@@ -133,6 +189,7 @@ describe('PdfView', () => {
     // 600pt wide page fitted into 300px → scale 0.5, painted at 2× for sharpness.
     expect(canvas().width).toBe(600);
     expect(canvas().height).toBe(792);
+    expect(pdf.getDocument).toHaveBeenCalledWith(expect.objectContaining(PDFJS_DOCUMENT_OPTIONS));
     expect(canvas().getAttribute('role')).toBe('img');
     expect(canvas().getAttribute('aria-label')).toBe('Page 1 of 5');
 
@@ -142,6 +199,45 @@ describe('PdfView', () => {
     expect(parseFloat(rect?.style.top ?? '')).toBeCloseTo(10);
     expect(parseFloat(rect?.style.width ?? '')).toBeCloseTo(50);
     expect(parseFloat(rect?.style.height ?? '')).toBeCloseTo(15);
+  });
+
+  it('describes the canvas with parsed page text while keeping its label concise', async () => {
+    await renderView();
+    await waitFor(() => pageDescription().includes('Second paragraph.'), 'accessible page text');
+
+    expect(canvas().getAttribute('aria-label')).toBe('Page 1 of 5');
+    expect(canvas().getAttribute('aria-describedby')).not.toBeNull();
+    expect(pageDescription()).toBe('Absorption is the first step.\nSecond paragraph.');
+  });
+
+  it('says when a page has no readable text instead of pretending it does', async () => {
+    pdf.page.getTextContent.mockResolvedValueOnce({ items: [{ str: '   ', hasEOL: true }], styles: {}, lang: 'en' });
+    await renderView();
+    await waitFor(() => pageDescription().startsWith('No readable text'), 'no-text fallback');
+
+    expect(pageDescription()).toBe('No readable text was found on this page. It may be a scan or image-only PDF.');
+  });
+
+  it('reports a text-extraction failure honestly', async () => {
+    pdf.page.getTextContent.mockRejectedValueOnce(new Error('text layer unavailable'));
+    await renderView();
+    await waitFor(() => pageDescription().startsWith('Page text could not be extracted'), 'extraction fallback');
+
+    expect(pageDescription()).toBe('Page text could not be extracted. This page may be a scan or image-only PDF.');
+  });
+
+  it('never describes a new page with the previous page text', async () => {
+    pdf.page.getTextContent
+      .mockResolvedValueOnce({ items: [{ str: 'First page words.', hasEOL: false }], styles: {}, lang: 'en' })
+      .mockResolvedValueOnce({ items: [{ str: 'Second page words.', hasEOL: false }], styles: {}, lang: 'en' });
+    await renderView();
+    await waitFor(() => pageDescription() === 'First page words.', 'first page text');
+
+    await rerenderView(RECTS, new Blob(['%PDF-1.4']), false, 'book-1', 2);
+    expect(pageDescription()).not.toBe('First page words.');
+    await waitFor(() => pageDescription() === 'Second page words.', 'second page text');
+    expect(canvas().getAttribute('aria-label')).toBe('Page 2 of 5');
+    expect(pdf.page.getTextContent).toHaveBeenCalledTimes(2);
   });
 
   it('rescales the overlay when the reader zooms', async () => {
@@ -156,6 +252,110 @@ describe('PdfView', () => {
     const rect = container.querySelector<HTMLElement>('.rd-pdf-rect');
     expect(parseFloat(rect?.style.left ?? '')).toBeCloseTo(6);
     expect(parseFloat(rect?.style.width ?? '')).toBeCloseTo(60);
+  });
+
+  it('caps a giant page bitmap and lowers render DPR as it zooms', async () => {
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 10_000 });
+    pdf.page.getViewport.mockImplementation(({ scale }: { scale: number }) => ({
+      scale,
+      width: 10_000 * scale,
+      height: 15_000 * scale,
+      transform: [scale, 0, 0, -scale, 0, 15_000 * scale],
+    }));
+
+    await renderView();
+    await waitFor(() => canvas().width > 0, 'capped first paint');
+    const firstTransform = pdf.page.render.mock.calls.at(-1)?.[0].transform as number[];
+    expect(firstTransform[0]).toBeLessThan(1);
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')?.click();
+    });
+    await waitFor(() => pdf.page.render.mock.calls.length >= 2, 'capped zoomed paint');
+    const zoomedTransform = pdf.page.render.mock.calls.at(-1)?.[0].transform as number[];
+
+    expect(zoomedTransform[0]).toBeLessThan(firstTransform[0]);
+    expect(canvas().width).toBeLessThanOrEqual(PDF_READER_CANVAS_MAX_DIMENSION);
+    expect(canvas().height).toBeLessThanOrEqual(PDF_READER_CANVAS_MAX_DIMENSION);
+    expect(canvas().width * canvas().height).toBeLessThanOrEqual(PDF_READER_CANVAS_MAX_PIXELS);
+    expect(canvas().getAttribute('aria-label')).toBe('Page 1 of 5');
+    expect(pageDescription()).toContain('Second paragraph.');
+
+    await act(async () => {
+      for (let step = 0; step < 9; step += 1) {
+        container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')?.click();
+      }
+    });
+    await waitFor(() => pdf.page.render.mock.calls.length >= 3, 'maximum zoom paint');
+    const maxZoomTransform = pdf.page.render.mock.calls.at(-1)?.[0].transform as number[];
+    expect(maxZoomTransform[0]).toBeLessThan(zoomedTransform[0]);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(canvas().width * canvas().height).toBeLessThanOrEqual(PDF_READER_CANVAS_MAX_PIXELS);
+  });
+
+  it('zeros the old bitmap before allocating a resized one', async () => {
+    await renderView();
+    await waitFor(() => canvas().width === 600, 'first paint');
+    const element = canvas();
+    const writes: number[] = [];
+    for (const dimension of ['width', 'height'] as const) {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, dimension)!;
+      Object.defineProperty(element, dimension, {
+        configurable: true,
+        get: () => descriptor.get!.call(element),
+        set: (value: number) => {
+          writes.push(value);
+          descriptor.set!.call(element, value);
+        },
+      });
+    }
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')?.click();
+    });
+    await waitFor(() => element.width === 720, 'resized paint');
+
+    expect(writes.slice(0, 4)).toEqual([0, 0, 720, 950]);
+  });
+
+  it('rejects an invalid viewport, clears the canvas and keeps accessible page text', async () => {
+    pdf.page.getViewport.mockReturnValue({
+      scale: 1,
+      width: Number.NaN,
+      height: 792,
+      transform: [1, 0, 0, -1, 0, 792],
+    });
+    await renderView();
+    await waitFor(() => pageDescription().includes('Second paragraph.'), 'accessible text after viewport failure');
+    await waitFor(() => Boolean(container.querySelector('[role="alert"]')), 'viewport error');
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('invalid dimensions');
+    expect(canvas().width).toBe(0);
+    expect(canvas().height).toBe(0);
+    expect(canvas().getAttribute('aria-label')).toBe('Page 1 of 5');
+  });
+
+  it('ignores non-finite sentence and word overlay rectangles', async () => {
+    await renderView(
+      [
+        { page: 1, x: 10, y: 20, w: 100, h: 30 },
+        { page: 1, x: Number.NaN, y: 20, w: 100, h: 30 },
+        { page: 1, x: 10, y: 20, w: Number.POSITIVE_INFINITY, h: 30 },
+        { page: 1, x: 10, y: 20, w: -1, h: 30 },
+      ],
+      undefined,
+      false,
+      'book-1',
+      1,
+      [
+        { page: 1, x: 12, y: 22, w: 20, h: 10 },
+        { page: 1, x: 12, y: Number.NaN, w: 20, h: 10 },
+      ],
+    );
+    await waitFor(() => canvas().width === 600, 'first paint');
+
+    expect(container.querySelectorAll('.rd-pdf-rect')).toHaveLength(1);
+    expect(container.querySelectorAll('.rd-pdf-word')).toHaveLength(1);
   });
 
   it('clears the render error after a later render succeeds', async () => {
@@ -430,8 +630,7 @@ describe('PdfView', () => {
     const panelButton = (label: string): HTMLButtonElement | undefined =>
       Array.from(bar.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === label);
     await act(async () => panelButton('Fix order')?.click());
-    const page = container.querySelector('.rd-pdf-page');
-    await act(async () => page?.querySelectorAll<HTMLButtonElement>('button[data-block-id]')[1]?.click());
+    await act(async () => bar.querySelector<HTMLButtonElement>('[data-small-block-id="b2"]')?.click());
     await act(async () => panelButton('Save')?.click());
 
     expect(onSaveOrder).toHaveBeenCalledWith(['b2', 'b1']);
