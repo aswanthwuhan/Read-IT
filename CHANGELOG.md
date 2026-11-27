@@ -1,5 +1,43 @@
 # Changelog
 
+## Read IT 0.6.3 — 2026-11-27
+
+Source-only pre-release focused on playback correctness, untrusted-input limits, local storage,
+offline reliability, accessibility and release tooling. No signed APK or Windows installer is
+attached to this pre-release.
+
+**Fixed — speech and voice selection**
+- Android Kokoro no longer trims quiet opening words; only exact-zero tail samples are removed.
+- Pocket TTS uses a fixed six-voice allowlist, a stable default and voice-aware audio-cache keys.
+
+**Hardened — imports and PDFs**
+- PDF, EPUB and DOCX imports have size, geometry, text, archive and cancellation limits.
+- ZIP imports are validated in a worker with CRC32 checks before buffering parsers run.
+- DOCX image bytes are not decoded; meaningful alt text is retained as readable figure text.
+- EPUB imports cannot fetch network resources, and oversized spine documents are refused early.
+
+**Improved — backups, library and storage**
+- Backup Merge no longer overwrites existing ids; Replace clears cached audio atomically.
+- The library uses lightweight summaries with lazy, bounded migration instead of loading every
+  original Blob and parsed document.
+- Cached-audio deletion and engine clearing use indexes; notes export avoids unrelated book reads.
+
+**Improved — PWA and release reliability**
+- Service-worker updates require an explicit reload, use app-scoped runtime caches and preserve
+  reader data during cleanup.
+- Added Pages artifact validation, deterministic SHA-256 sums and Android JVM CI.
+- Android release packaging now fails closed when signing credentials are absent.
+
+**Accessibility and product copy**
+- Added modal/popover focus guards, crash recovery, PDF page-text alternatives, contrast and
+  control-size fixes, and clearer scanned-PDF/system-voice/model-size wording.
+
+**Known pre-release blockers**
+- A pruned, pinned Pocket `voices.bin` and per-voice rights evidence are still required.
+- Runtime model revisions and SHA-256 hashes, including the Android fp32 Kokoro graph, are missing.
+- Signed Android/Windows artifacts and real-device/PWA rollout validation are still outstanding.
+- This is not legal clearance; attribution and relicensing questions remain for owner/counsel review.
+
 ## Read IT 0.6.2 — 2026-11-24
 
 Maintenance release for imports, reader controls and speech playback.

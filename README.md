@@ -6,8 +6,8 @@ Offline-first reader for books you already own: import your own PDF, EPUB, DOCX,
 and web articles, read them in a reflowing reader (or as PDF pages), and listen to them with
 on-device voices. Files, highlights and notes live in IndexedDB on your device only —
 no account, no backend, no server for reading. Apache-2.0.
-Version 0.6.2 is the current public Read IT release: Android, Windows and the web as an
-installable PWA. See `CHANGELOG.md`. The source is public at
+Version 0.6.3 is the current source-only pre-release. Android, Windows and PWA builds remain
+available from source; see `CHANGELOG.md`. The source is public at
 [github.com/aswanthwuhan/Read-IT](https://github.com/aswanthwuhan/Read-IT).
 
 ## Who it is for
@@ -30,18 +30,16 @@ installable PWA. See `CHANGELOG.md`. The source is public at
 
 ## Download / install
 
-**Public source, private build pipeline.** v0.6.2 is the current release: the source is
-public on GitHub; the Android APK is an unsigned debug build for review and testing, and
-the store accounts are not open. What ships, and how you install it:
+**Public source, source-only pre-release.** v0.6.3 is published as source archives only. No
+signed APK or Windows installer is attached. Build the app with the instructions below.
 
-**Android (APK).** Android 8.0 or newer with WebView 110+ is required. The v0.6.2 release is
-a source release; build and install the APK with [docs/ANDROID.md](docs/ANDROID.md). A signed,
+**Android (APK).** Android 8.0 or newer with WebView 110+ is required. The v0.6.3 pre-release is
+source-only; build and install the APK with [docs/ANDROID.md](docs/ANDROID.md). A signed,
 store-ready APK is planned for the store launch.
 
-**Windows (installer).** A Windows installer (`ReadIT_*_x64-setup.exe`) that installs per user
-with no admin prompt. The build is unsigned, so SmartScreen shows "Windows protected your PC":
-choose **More info → Run anyway**. It needs WebView2, which is already on Windows 10 and 11.
-Details are in [docs/WINDOWS.md](docs/WINDOWS.md).
+**Windows (installer).** No installer is attached to the v0.6.3 source-only pre-release. Build
+the per-user NSIS installer with [docs/WINDOWS.md](docs/WINDOWS.md). It needs WebView2, which is
+already on Windows 10 and 11.
 
 **PWA.** The web app is hosted on GitHub Pages at /Read-IT/ and installs from the browser. On Android
 Chrome use ⋮ → **Install app**. On iPhone or iPad use Share → **Add to Home Screen**. On desktop
