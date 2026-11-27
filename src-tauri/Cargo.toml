@@ -1,6 +1,6 @@
 [package]
 name = "readit"
-version = "0.6.2"
+version = "0.6.3"
 description = "Read IT desktop shell (offline ebook reader with on-device text-to-speech)"
 authors = ["AuraPharmLab"]
 license = "Apache-2.0"
